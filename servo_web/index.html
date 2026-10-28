@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot Arm Control</title>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0b1220;color:#e7eef9;font-family:Arial,sans-serif;display:grid;place-items:center;padding:20px}
+.painel{width:min(700px,100%);padding:26px;background:#172235;border:1px solid #334155;border-radius:20px}
+header{display:flex;justify-content:space-between;align-items:start;gap:15px}h1{margin:0;font-size:24px}h2{font-size:16px;margin:0}
+.sub,.legenda{color:#a5b9d3;font-size:13px;margin-top:8px}#status{font-size:12px;color:#fb7185}#status.ok{color:#4ade80}
+.tabs{display:flex;gap:8px;margin:26px 0}button{background:#26364d;color:#fff;border:1px solid #425673;padding:12px;border-radius:10px;cursor:pointer;font-size:14px}button:hover{background:#354a67}button.ativo{background:#2563eb}.tabs button{flex:1}.escondido{display:none!important}
+.controles{display:flex;gap:15px;margin-bottom:20px}.caixa{flex:1;min-width:0;background:#101827;border-radius:14px;padding:18px;text-align:center}.numero{font-size:32px;font-weight:bold;color:#4db5ff;margin:15px 0}
+.area{height:250px;display:grid;place-items:center;touch-action:none}.trilha{position:relative;background:#3a4b64;border-radius:20px;touch-action:none;cursor:pointer}.trilha.vertical{height:190px;width:12px}.trilha.horizontal{width:100%;height:12px}
+.knob{position:absolute;width:38px;height:38px;border-radius:50%;background:#4db5ff;border:4px solid #dbeafe;transform:translate(-50%,-50%);box-shadow:0 3px 12px #0008;pointer-events:none}.vertical .knob{left:50%}.horizontal .knob{top:50%}
+.joystick{position:relative;width:min(340px,100%);aspect-ratio:1;margin:0 auto;border:2px solid #3b4d66;border-radius:16px;background:linear-gradient(90deg,transparent 49.8%,#42536c 50%,transparent 50.2%),linear-gradient(0deg,transparent 49.8%,#42536c 50%,transparent 50.2%),#101827;touch-action:none;cursor:crosshair}.joystick svg{width:100%;height:100%;pointer-events:none}.xy-knob{position:absolute;width:24px;height:24px;border:3px solid white;border-radius:50%;background:#4db5ff;transform:translate(-50%,-50%);pointer-events:none}
+.valores{display:flex;justify-content:center;gap:22px;margin:18px 0;font-size:17px}.dados{margin-top:22px;padding:15px;border-radius:12px;background:#101827;display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:14px}.dados span{color:#a5b9d3}.acoes{display:flex;gap:10px;margin-top:18px}.acoes button{flex:1}#mensagem{text-align:center;margin-top:20px;color:#a5b9d3;font-size:13px;min-height:16px}
+@media(max-width:470px){.painel{padding:15px}.caixa{padding:10px}h1{font-size:20px}.numero{font-size:26px}}
+</style>
+</head>
+<body>
+<main class="painel">
+<header><div><h1>Robot Arm Control</h1><div class="sub">Arduino Uno · Braço 2-DOF</div></div><div id="status">● Verificando</div></header>
+<div class="tabs"><button id="btnDireta" class="ativo" onclick="mudarModo(1)">Direta · Ângulos</button><button id="btnInversa" onclick="mudarModo(0)">Inversa · XY</button></div>
+<section id="direta" class="controles">
+  <div class="caixa"><h2>Servo 1</h2><div id="valorA1" class="numero">90°</div><div class="area"><div id="trilha1" class="trilha vertical"><div id="knob1" class="knob"></div></div></div><div class="legenda">Junta 1 · D6</div></div>
+  <div class="caixa"><h2>Servo 2</h2><div id="valorA2" class="numero">90°</div><div class="area"><div id="trilha2" class="trilha horizontal"><div id="knob2" class="knob"></div></div></div><div class="legenda">Junta 2 · D4</div></div>
+</section>
+<section id="inversa" class="escondido"><div class="sub" style="text-align:center;margin-bottom:16px">Arraste o ponto para posicionar a ponta do braço</div>
+  <div id="joystick" class="joystick"><svg viewBox="0 0 340 340"><circle cx="170" cy="170" r="164" fill="#1e90ff" fill-opacity=".13" stroke="#3b82f6" stroke-opacity=".6"/><circle cx="170" cy="170" r="73" fill="#101827" stroke="#64748b" stroke-dasharray="5 5"/><text x="322" y="161" fill="#94a3b8" font-size="12" text-anchor="end">+X</text><text x="179" y="18" fill="#94a3b8" font-size="12">+Y</text></svg><div id="xyKnob" class="xy-knob"></div></div>
+  <div class="valores"><div>X: <strong id="valorX">-13.0</strong></div><div>Y: <strong id="valorY">15.0</strong></div></div><div class="legenda" style="text-align:center">Pontos fora do alcance ou dos limites das juntas não são enviados.</div>
+</section>
+<div class="dados"><div><span>Ângulo 1:</span> <b id="infoA1">90°</b></div><div><span>Ângulo 2:</span> <b id="infoA2">90°</b></div><div><span>Posição X:</span> <b id="infoX">-13.00</b></div><div><span>Posição Y:</span> <b id="infoY">15.00</b></div></div>
+<div class="acoes"><button onclick="centralizar()">Centralizar servos</button></div><div id="mensagem">Pronto para controlar</div>
+</main>
+<script>
+const R1=15,R2=13,RMIN=12,RMAX=27;
+let modo=1,a1=90,a2=90,x=-13,y=15;
+let timer=null,enviando=false,revisao=0,ultimaEnviada=0,ultimoEnvio=0;
+const $=id=>document.getElementById(id);
+function direta(ang1,ang2){const t1=ang1*Math.PI/180,t2=ang2*Math.PI/180;return{x:R1*Math.cos(t1)+R2*Math.cos(t1+t2),y:R1*Math.sin(t1)+R2*Math.sin(t1+t2)}}
+function inversa(px,py){const raio=Math.hypot(px,py);if(raio<RMIN||raio>RMAX)return null;let c2=(px*px+py*py-R1*R1-R2*R2)/(2*R1*R2);c2=Math.max(-1,Math.min(1,c2));const s2=Math.sqrt(Math.max(0,1-c2*c2)),t2=Math.atan2(s2,c2),t1=Math.atan2(py,px)-Math.atan2(R2*s2,R1+R2*c2),aa=Math.round(t1*180/Math.PI),bb=Math.round(t2*180/Math.PI);if(aa<0||aa>180||bb<0||bb>180)return null;return{a1:aa,a2:bb}}
+function atualizarTela(){$("valorA1").textContent=`${a1}°`;$('valorA2').textContent=`${a2}°`;$('knob1').style.top=`${100-a1/180*100}%`;$('knob2').style.left=`${a2/180*100}%`;$('valorX').textContent=x.toFixed(1);$('valorY').textContent=y.toFixed(1);$('xyKnob').style.left=`${(x+28)/56*100}%`;$('xyKnob').style.top=`${(28-y)/56*100}%`;$('infoA1').textContent=`${a1}°`;$('infoA2').textContent=`${a2}°`;$('infoX').textContent=x.toFixed(2);$('infoY').textContent=y.toFixed(2)}
+function mudarModo(novoModo){modo=novoModo;$('direta').classList.toggle('escondido',modo!==1);$('inversa').classList.toggle('escondido',modo!==0);$('btnDireta').classList.toggle('ativo',modo===1);$('btnInversa').classList.toggle('ativo',modo===0);$('mensagem').textContent=modo===1?'Controle individual das juntas':'Controle da posição XY'}
+function configurarTrilha(id,eixo){const el=$(id);function mover(e){const rect=el.getBoundingClientRect();let p=eixo===1?1-(e.clientY-rect.top)/rect.height:(e.clientX-rect.left)/rect.width;p=Math.max(0,Math.min(1,p));const ang=Math.round(p*180);if(eixo===1)a1=ang;else a2=ang;const pos=direta(a1,a2);x=pos.x;y=pos.y;atualizarTela();agendarEnvio()}el.addEventListener('pointerdown',e=>{el.setPointerCapture(e.pointerId);mover(e)});el.addEventListener('pointermove',e=>{if(el.hasPointerCapture(e.pointerId))mover(e)})}
+const joystick=$('joystick');function moverXY(e){const rect=joystick.getBoundingClientRect();const px=Math.max(-28,Math.min(28,((e.clientX-rect.left)/rect.width)*56-28));const py=Math.max(-28,Math.min(28,28-((e.clientY-rect.top)/rect.height)*56));const res=inversa(px,py);if(!res){$('mensagem').textContent='Posição fora do alcance ou dos limites das juntas';return}a1=res.a1;a2=res.a2;const pos=direta(a1,a2);x=pos.x;y=pos.y;atualizarTela();agendarEnvio()}
+joystick.addEventListener('pointerdown',e=>{joystick.setPointerCapture(e.pointerId);moverXY(e)});joystick.addEventListener('pointermove',e=>{if(joystick.hasPointerCapture(e.pointerId))moverXY(e)});
+function agendarEnvio(){revisao++;if(timer!==null)return;const espera=Math.max(0,70-(Date.now()-ultimoEnvio));timer=setTimeout(()=>{timer=null;enviar()},espera)}
+async function enviar(){if(enviando)return;enviando=true;try{while(ultimaEnviada<revisao){const versao=revisao,dados={modo:1,valor1:a1,valor2:a2};ultimoEnvio=Date.now();const resposta=await fetch('/servo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(dados)});if(!resposta.ok)throw Error(`Falha HTTP ${resposta.status}`);ultimaEnviada=versao;$('mensagem').textContent=`Comando enviado: ${dados.valor1}°, ${dados.valor2}°`}}catch(erro){$('mensagem').textContent=erro.message;ultimaEnviada=revisao}finally{enviando=false}}
+function centralizar(){a1=90;a2=90;const p=direta(a1,a2);x=p.x;y=p.y;atualizarTela();agendarEnvio()}
+async function verificarStatus(){try{const resp=await fetch('/status'),dados=await resp.json();$('status').textContent=dados.conectado?'● Conectado':'● Desconectado';$('status').classList.toggle('ok',dados.conectado)}catch{$('status').textContent='● Sem conexão';$('status').classList.remove('ok')}}
+configurarTrilha('trilha1',1);configurarTrilha('trilha2',2);atualizarTela();verificarStatus();setInterval(verificarStatus,5000);
+</script>
+</body>
+</html>
