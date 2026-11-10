@@ -1,3 +1,8 @@
 __pycache__/
 *.pt
 .env
+
+# pesos/modelos exportados ficam fora do git (distribuir por scp)
+visao/pi/models/
+*.onnx
+*.ncnn.bin
