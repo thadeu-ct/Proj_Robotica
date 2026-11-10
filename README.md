@@ -6,5 +6,6 @@ Códigos de apoio temporários.
 - `arduino/cinematica_braco/`: cinemática direta e inversa do braço de 2 servos
 - `servo_web/`: controle do servo pelo navegador (instruções no README da pasta)
 - `visao/`: calibração da câmera, AprilTag e YOLO (vindos de [STimmy10/Robotica](https://github.com/STimmy10/Robotica))
-- `visao/pi/`: teste do detector (YOLO26n em NCNN) + AprilTag no Raspberry Pi via SSH. Passo a passo e resultados em `visao/pi/NOTAS_PI.md`. Os modelos (`visao/pi/models/`) ficam fora do git e vão para o Pi por `scp`
+- `visao/pc/`: **como usar hoje.** O Pi só transmite a câmera e o computador roda YOLO + AprilTag (com distância). Para ligar: `cd visao/pc && ./iniciar.sh`. Guia em `visao/pc/README.md`
+- `visao/pi/`: servidor de câmera do Pi (`camera_server.py`) e o teste antigo com o YOLO rodando no próprio Pi (`teste_visao.py`, notas em `NOTAS_PI.md`). Os modelos (`visao/pi/models/`) ficam fora do git
 - `dashboard/`: painel do robô para a tela (vista superior, câmera, modo, itens, tempo, bateria), atualizado por JSON. Ver `dashboard/README.md`

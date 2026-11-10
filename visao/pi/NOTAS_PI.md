@@ -48,3 +48,12 @@ Saídas em out/: CSV por quadro (latência, inferência, detecções) e imagens 
 - Rodar dentro de tmux para o teste sobreviver a quedas do SSH
 - Aviso de locale vem do Terminal do Mac (LC_CTYPE=UTF-8); resolver com export acima
 - Patch aplicado duas vezes no Pi gera linha "caixas NaN" duplicada no resumo (só cosmético)
+
+## Mudança (10/11/2026): o Pi só transmite, o computador processa
+
+- O Pi 3 é o hardware final, mas os 4,5 fps do NCNN 320 não batem a meta. Agora o Pi roda só o `camera_server.py`, que captura a webcam e manda MJPEG na porta 8080. YOLO e AprilTag rodam no computador (`visao/pc/`).
+- Para ligar: `cd visao/pc && ./iniciar.sh`. O passo a passo e a solução de problemas estão em `visao/pc/README.md`.
+- AprilTag do lab: **tag25h9, ID 5**, confirmada nas fotos de 23/09. O relatório fala em tag36h11; o detector aceita as duas. O código antigo usava `tag_size=0.004` (4 mm), o que está errado: o lado da tag tem cerca de 100 mm (medir).
+- O `pupil-apriltags` não detectou a tag25h9 nas fotos reais; o `cv2.aruco` (DICT_APRILTAG_25h9) detectou. A pose vem de `solvePnP` IPPE_SQUARE.
+- Câmera: fx ≈ 826 px (cerca de 42° de campo horizontal), calculado com as 6 fotos do tabuleiro 8x5. A calibração antiga (fx 840, cx 262, k3 = 13) estava sobreajustada. Recalibrar com `calibrar_camera.py --auto`.
+- Dataset em `~/Downloads/fotos_robotica_yolo` (355 fotos). O `data.yaml` de lá lista as classes em outra ordem, mas o `nano_LR.pt` acerta 109 de 109 rótulos com os nomes que traz dentro dele, então não há troca de nomes.

@@ -1,0 +1,4 @@
+# lado do computador (Mac/Linux/Windows). No Pi so precisa de opencv (ja instalado no ~/yolo/.venv)
+ultralytics>=8.4.55
+opencv-python
+numpy

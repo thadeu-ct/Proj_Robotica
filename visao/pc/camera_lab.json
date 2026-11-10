@@ -1,0 +1,33 @@
+{
+  "descricao": "Webcam USB do lab (fotos WIN_20260923 com tabuleiro 8x5). Centro fixo, sem distorcao. Provisoria: recalibre com calibrar_camera.py",
+  "K": [
+    [
+      826.3,
+      0,
+      320.0
+    ],
+    [
+      0,
+      826.3,
+      240.0
+    ],
+    [
+      0,
+      0,
+      1
+    ]
+  ],
+  "dist": [
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "size": [
+    640,
+    480
+  ],
+  "rms_px": 0.608,
+  "n_fotos": 6
+}

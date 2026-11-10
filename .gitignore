@@ -6,3 +6,7 @@ __pycache__/
 visao/pi/models/
 *.onnx
 *.ncnn.bin
+visao/pc/.venv/
+visao/pc/capturas/
+visao/pc/ajuste_distancia.json
+camera_server.log
