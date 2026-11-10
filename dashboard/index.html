@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel do Rover</title>
+<style>
+  :root {
+    --bg: #0b0e12;
+    --painel: #141a21;
+    --borda: #263040;
+    --texto: #e8edf2;
+    --fraco: #7d8a99;
+    --verde: #3ddc84;
+    --amarelo: #ffc53d;
+    --vermelho: #ff5a5a;
+    --azul: #4da3ff;
+    --gap: 1.2vmin;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; background: var(--bg); color: var(--texto); overflow: hidden;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .tela {
+    height: 100vh; padding: var(--gap); gap: var(--gap);
+    display: grid;
+    grid-template-columns: minmax(0, 34fr) minmax(0, 66fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "vs   topo"
+      "vs   vc"
+      "lado rodape";
+  }
+  .painel { background: var(--painel); border: 1px solid var(--borda); border-radius: 1vmin; position: relative; min-height: 0; }
+  .rotulo { position: absolute; top: .8vmin; left: 1vmin; z-index: 2; font-size: 1.6vmin; font-weight: 700;
+    letter-spacing: .15em; color: var(--fraco); background: rgba(11,14,18,.7); padding: .2vmin .7vmin; border-radius: .5vmin; }
+
+  /* coluna esquerda: VS em cima, modo e itens embaixo */
+  .esquerda { grid-area: vs / vs / lado / lado; display: grid; gap: var(--gap);
+    grid-template-rows: minmax(0, 1fr) auto auto; min-height: 0; }
+
+  .video { overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .video img, .video canvas.mapa { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .video canvas.caixas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .semsinal { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1vmin; color: var(--fraco); font-size: 2.4vmin; font-weight: 700; letter-spacing: .1em; }
+  .semsinal small { font-size: 1.4vmin; font-weight: 400; letter-spacing: 0; max-width: 80%; text-align: center; word-break: break-all; }
+  .vs { aspect-ratio: 1 / 1; max-height: 100%; width: 100%; justify-self: center; }
+
+  .modo { padding: 1.4vmin 1.6vmin; display: flex; align-items: center; justify-content: space-between; gap: 1vmin; }
+  .modo .titulo { font-size: 1.6vmin; font-weight: 700; letter-spacing: .15em; color: var(--fraco); }
+  .modo .valor { font-size: 4.2vmin; font-weight: 800; letter-spacing: .04em; text-align: right; line-height: 1; }
+
+  .itens { padding: 4vmin 1.2vmin 1.2vmin; }
+  .grade { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1vmin; }
+  .item { border: 1px solid var(--borda); border-radius: .8vmin; padding: .8vmin .4vmin; text-align: center;
+    color: #3a4655; transition: color .15s, border-color .15s, background .15s; position: relative; }
+  .item svg { width: 6vmin; height: 6vmin; display: block; margin: 0 auto .4vmin; }
+  .item .nome { font-size: 1.35vmin; font-weight: 600; }
+  .item .conf { font-size: 1.3vmin; min-height: 1.6vmin; }
+  .item .qtd { position: absolute; top: .4vmin; right: .6vmin; font-size: 1.5vmin; font-weight: 800; }
+  .item.ativo { color: var(--verde); border-color: var(--verde); background: rgba(61,220,132,.08); }
+
+  /* direita */
+  .topo { grid-area: topo; display: flex; gap: var(--gap); justify-content: flex-end; align-items: stretch; }
+  .tempo { flex: 1; display: flex; align-items: center; justify-content: center; gap: 2vmin; padding: .8vmin 2vmin; }
+  .tempo .titulo, .bat .titulo { font-size: 1.6vmin; font-weight: 700; letter-spacing: .15em; color: var(--fraco); }
+  .tempo .valor { font-size: 7vmin; font-weight: 800; line-height: 1; }
+  .tempo .estado { font-size: 1.5vmin; color: var(--fraco); min-width: 9vmin; }
+  .tempo.alerta .valor { color: var(--amarelo); }
+  .tempo.fim .valor { color: var(--vermelho); animation: pisca 1s steps(2, start) infinite; }
+  @keyframes pisca { to { visibility: hidden; } }
+
+  .bat { display: flex; align-items: center; gap: 1.6vmin; padding: .8vmin 2vmin; }
+  .bat svg { height: 6vmin; width: auto; }
+  .bat .pct { font-size: 4.6vmin; font-weight: 800; line-height: 1; }
+  .bat .tensao { font-size: 1.5vmin; color: var(--fraco); }
+
+  .vc { grid-area: vc; }
+  .rodape { grid-area: rodape; display: flex; align-items: center; gap: 2vmin; padding: 1vmin 1.6vmin;
+    font-size: 1.7vmin; color: var(--fraco); }
+  .rodape .msg { flex: 1; color: var(--verde); font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .ponto { width: 1.3vmin; height: 1.3vmin; border-radius: 50%; background: var(--vermelho); display: inline-block; margin-right: .6vmin; vertical-align: middle; }
+  .ponto.ok { background: var(--verde); }
+  .velho { opacity: .35; }
+</style>
+</head>
+<body>
+<main class="tela">
+  <section class="esquerda">
+    <div class="painel video vs" id="vs">
+      <span class="rotulo">VISTA SUPERIOR</span>
+      <img id="vs-img" alt="" hidden>
+      <canvas id="vs-mapa" class="mapa" width="800" height="800"></canvas>
+    </div>
+    <div class="painel modo"><span class="titulo">MODO</span><span class="valor" id="modo">—</span></div>
+    <div class="painel itens"><span class="rotulo">ITENS VISTOS</span><div class="grade" id="itens"></div></div>
+  </section>
+
+  <div class="topo">
+    <div class="painel tempo" id="tempo">
+      <span class="titulo">TEMPO</span><span class="valor num" id="tempo-valor">4:00</span><span class="estado" id="tempo-estado">parado</span>
+    </div>
+    <div class="painel bat" id="bat">
+      <span class="titulo">BAT</span>
+      <svg viewBox="0 0 64 30" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="55" height="27" rx="4" fill="none" stroke="currentColor" stroke-width="3"/>
+        <rect x="57" y="9" width="5.5" height="12" rx="1.5" fill="currentColor"/>
+        <rect id="bat-nivel" x="5" y="5" width="0" height="20" rx="2"/>
+      </svg>
+      <div><div class="pct num" id="bat-pct">—</div><div class="tensao num" id="bat-tensao"></div></div>
+    </div>
+  </div>
+
+  <div class="painel video vc" id="vc">
+    <span class="rotulo">VISÃO DA CÂMERA</span>
+    <img id="vc-img" alt="" hidden>
+    <canvas id="vc-caixas" class="caixas"></canvas>
+  </div>
+
+  <footer class="painel rodape">
+    <span><span class="ponto" id="con"></span><span id="con-txt">desconectado</span></span>
+    <span class="msg" id="msg"></span>
+    <span class="num" id="idade"></span>
+  </footer>
+</main>
+
+<script>
+// classes do modelo nano_LR (visao/pi/NOTAS_PI.md)
+const CLASSES = [
+  ["ampulheta", "Ampulheta", '<path d="M16 6h32M16 58h32M20 6c0 16 24 18 24 26S20 42 20 58M44 6c0 16-24 18-24 26s24 10 24 26"/>'],
+  ["anel_base", "Anel base", '<ellipse cx="32" cy="36" rx="24" ry="10"/><ellipse cx="32" cy="34" rx="11" ry="4.5"/><path d="M8 36v6c0 5.5 10.7 10 24 10s24-4.5 24-10v-6"/>'],
+  ["anel_haste", "Anel haste", '<ellipse cx="32" cy="40" rx="20" ry="8"/><ellipse cx="32" cy="39" rx="9" ry="3.5"/><path d="M32 6v30"/><circle cx="32" cy="6" r="2.5"/>'],
+  ["cilindro", "Cilindro", '<ellipse cx="32" cy="12" rx="16" ry="6"/><path d="M16 12v40c0 3.3 7.2 6 16 6s16-2.7 16-6V12"/>'],
+  ["icosaedro", "Icosaedro", '<path d="M32 4 56 18v28L32 60 8 46V18Z"/><path d="M32 4 20 26h24ZM20 26 8 46M44 26l12 20M20 26l12 22 12-22M32 48v12M8 18l12 8M56 18l-12 8M8 46l24 2 24-2"/>'],
+  ["peca_chata", "Peça chata", '<path d="M6 34 22 22h36L42 34Z"/><path d="M6 34v6h36l16-12v-6M42 34v6"/>'],
+];
+const VALIDADE_DET = 1.5;   // s: deteccao mais velha que isso apaga o item
+const VALIDADE_BAT = 15;    // s: bateria mais velha que isso fica apagada
+
+const $ = id => document.getElementById(id);
+let snap = null, offset = 0;   // offset = relogio do servidor - relogio local
+
+// ---- itens
+$("itens").innerHTML = CLASSES.map(([id, nome, svg]) =>
+  `<div class="item" id="it-${id}"><span class="qtd num"></span>
+     <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">${svg}</svg>
+     <div class="nome">${nome}</div><div class="conf num"></div></div>`).join("");
+
+const agoraSrv = () => Date.now() / 1000 + offset;
+const idade = campo => snap && snap.atualizado_em[campo] ? agoraSrv() - snap.atualizado_em[campo] : Infinity;
+const semAcento = s => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+
+function desenharItens() {
+  const e = snap.estado, valido = idade("deteccoes") < VALIDADE_DET;
+  for (const [id] of CLASSES) {
+    const dets = valido ? (e.deteccoes || []).filter(d => d.classe === id) : [];
+    const el = $("it-" + id), conf = Math.max(0, ...dets.map(d => +d.conf || 0));
+    el.classList.toggle("ativo", dets.length > 0);
+    el.querySelector(".conf").textContent = dets.length && conf ? Math.round(conf * 100) + "%" : "";
+    el.querySelector(".qtd").textContent = dets.length > 1 ? "×" + dets.length : "";
+  }
+}
+
+// ---- modo
+const CORES_MODO = { MANUAL: "--amarelo", AUTONOMO: "--verde", RETORNO: "--azul", PARADO: "--vermelho", EMERGENCIA: "--vermelho", ERRO: "--vermelho" };
+function desenharModo() {
+  const m = snap.estado.modo || "—", chave = Object.keys(CORES_MODO).find(k => semAcento(m).includes(k));
+  $("modo").textContent = m;
+  $("modo").style.color = chave ? `var(${CORES_MODO[chave]})` : "var(--texto)";
+}
+
+// ---- bateria
+function desenharBateria() {
+  const e = snap.estado, velho = idade("bateria") > VALIDADE_BAT;
+  const pct = e.bateria == null ? null : Math.max(0, Math.min(100, +e.bateria));
+  const cor = pct == null ? "--fraco" : pct > 50 ? "--verde" : pct > 20 ? "--amarelo" : "--vermelho";
+  $("bat").style.color = `var(${cor})`;
+  $("bat").classList.toggle("velho", velho && pct != null);
+  $("bat-nivel").setAttribute("width", pct == null ? 0 : (48 * pct / 100).toFixed(1));
+  $("bat-nivel").setAttribute("fill", "currentColor");
+  $("bat-pct").textContent = pct == null ? "—" : Math.round(pct) + "%";
+  $("bat-tensao").textContent = e.tensao != null ? (+e.tensao).toFixed(2) + " V" : "";
+}
+
+// ---- tempo (conta localmente entre uma mensagem e outra)
+function desenharTempo() {
+  if (!snap) return;
+  const t = snap.estado.tempo;
+  const r = t.rodando ? Math.max(0, t.restante - (agoraSrv() - t.em)) : t.restante;
+  const s = Math.ceil(r), mm = Math.floor(s / 60), ss = String(s % 60).padStart(2, "0");
+  $("tempo-valor").textContent = `${mm}:${ss}`;
+  $("tempo").classList.toggle("fim", r <= 0);
+  $("tempo").classList.toggle("alerta", r > 0 && r <= 30);
+  $("tempo-estado").textContent = r <= 0 ? "fim" : t.rodando ? "rodando" : t.restante < t.duracao ? "pausado" : "parado";
+}
+
+// ---- videos (MJPEG ou imagem por URL; tenta de novo se cair)
+function ligarVideo(painel, img, url) {
+  if (img.dataset.url === url) return;
+  img.dataset.url = url;
+  clearTimeout(img._retry);
+  painel.querySelector(".semsinal")?.remove();
+  if (!url) { img.hidden = true; img.removeAttribute("src"); return; }
+  img.onload = () => { img.hidden = false; painel.querySelector(".semsinal")?.remove(); };
+  img.onerror = () => {
+    img.hidden = true;
+    if (!painel.querySelector(".semsinal")) painel.insertAdjacentHTML("beforeend",
+      `<div class="semsinal">SEM SINAL<small>${url.replace(/</g, "&lt;")}</small></div>`);
+    img._retry = setTimeout(() => { if (img.dataset.url === url) img.src = url; }, 2000);
+  };
+  img.src = url;
+}
+
+function desenharVideos() {
+  const v = snap.estado.video || {};
+  ligarVideo($("vc"), $("vc-img"), v.vc || "");
+  if (!v.vc && !$("vc").querySelector(".semsinal"))
+    $("vc").insertAdjacentHTML("beforeend", '<div class="semsinal">SEM VÍDEO<small>envie {"video": {"vc": "http://IP:8080/stream"}}</small></div>');
+  ligarVideo($("vs"), $("vs-img"), v.vs || "");
+  $("vs-mapa").hidden = !!v.vs;
+}
+
+// caixas do YOLO por cima do video da camera (so se a deteccao trouxer "caixa")
+function desenharCaixas() {
+  const cv = $("vc-caixas"), img = $("vc-img"), r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  if (cv.width !== Math.round(r.width * dpr) || cv.height !== Math.round(r.height * dpr)) {
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  }
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, r.width, r.height);
+  if (!snap || img.hidden || !img.naturalWidth || idade("deteccoes") > VALIDADE_DET) return;
+  const iw = img.naturalWidth, ih = img.naturalHeight, k = Math.min(r.width / iw, r.height / ih);
+  const ox = (r.width - iw * k) / 2, oy = (r.height - ih * k) / 2;
+  g.lineWidth = 3; g.font = `600 ${Math.max(12, r.height * .03)}px system-ui`; g.textBaseline = "bottom";
+  for (const d of snap.estado.deteccoes || []) {
+    if (!Array.isArray(d.caixa) || d.caixa.length !== 4) continue;
+    let [x1, y1, x2, y2] = d.caixa.map(Number);
+    if (Math.max(x1, y1, x2, y2) <= 1) { x1 *= iw; x2 *= iw; y1 *= ih; y2 *= ih; }   // normalizada -> pixels
+    const X = ox + x1 * k, Y = oy + y1 * k, W = (x2 - x1) * k, H = (y2 - y1) * k;
+    const txt = `${d.classe}${d.conf != null ? " " + Math.round(d.conf * 100) + "%" : ""}`;
+    g.strokeStyle = "#3ddc84"; g.strokeRect(X, Y, W, H);
+    const tw = g.measureText(txt).width + 8, th = parseInt(g.font.split(" ")[1]) + 4;
+    g.fillStyle = "#3ddc84"; g.fillRect(X - 1.5, Y - th, tw, th);
+    g.fillStyle = "#0b0e12"; g.fillText(txt, X + 3, Y - 2);
+  }
+}
+
+// mapa da arena 2 x 2 m quando nao ha video da vista superior
+function desenharMapa() {
+  const cv = $("vs-mapa"); if (cv.hidden || !snap) return;
+  const g = cv.getContext("2d"), N = cv.width, m = 40, L = N - 2 * m, esc = L / 2;   // 2 m de lado
+  const e = snap.estado, lado = (e.arena && e.arena.resgate) || "SO";
+  g.clearRect(0, 0, N, N);
+  g.strokeStyle = "#263040"; g.lineWidth = 1;
+  for (let i = 1; i < 4; i++) { const p = m + i * L / 4; g.beginPath(); g.moveTo(p, m); g.lineTo(p, m + L); g.moveTo(m, p); g.lineTo(m + L, p); g.stroke(); }
+  // area de resgate 50 x 50 cm no canto
+  const rs = .5 * esc, rx = lado.includes("O") ? m : m + L - rs, ry = lado.includes("N") ? m : m + L - rs;
+  g.fillStyle = "rgba(61,220,132,.18)"; g.fillRect(rx, ry, rs, rs);
+  g.strokeStyle = "#3ddc84"; g.lineWidth = 3; g.strokeRect(rx, ry, rs, rs);
+  g.strokeStyle = "#7d8a99"; g.lineWidth = 4; g.strokeRect(m, m, L, L);
+  g.fillStyle = "#7d8a99"; g.font = "600 22px system-ui"; g.textAlign = "center";
+  g.fillText("2 m", N / 2, m - 10);
+  const p = e.pose, velho = idade("pose") > 3;
+  if (!p || p.x == null || p.y == null) {
+    g.fillText("sem pose do robô", N / 2, N / 2); return;
+  }
+  // x para a direita, y para cima, origem no canto inferior esquerdo; rumo em graus a partir do eixo x
+  const X = m + p.x * esc, Y = m + L - p.y * esc, a = -(+p.rumo || 0) * Math.PI / 180, s = .12 * esc;
+  g.save(); g.translate(X, Y); g.rotate(a); g.globalAlpha = velho ? .35 : 1;
+  g.fillStyle = "#4da3ff"; g.strokeStyle = "#e8edf2"; g.lineWidth = 3;
+  g.beginPath(); g.moveTo(s * 1.4, 0); g.lineTo(-s, s); g.lineTo(-s * .5, 0); g.lineTo(-s, -s); g.closePath(); g.fill(); g.stroke();
+  g.restore();
+}
+
+function desenharRodape() {
+  const e = snap.estado, i = Math.min(...Object.values(snap.atualizado_em).map(t => agoraSrv() - t));
+  $("msg").textContent = e.mensagem || "";
+  $("idade").textContent = isFinite(i) ? `último dado há ${i < 1 ? "<1" : Math.round(i)} s` : "nenhum dado recebido";
+}
+
+function desenharTudo() {
+  if (!snap) return;
+  desenharModo(); desenharBateria(); desenharItens(); desenharVideos(); desenharMapa(); desenharRodape(); desenharTempo();
+}
+
+// ---- conexao com o servidor (SSE reconecta sozinho)
+function conectar() {
+  const es = new EventSource("/api/eventos");
+  es.onopen = () => { $("con").classList.add("ok"); $("con-txt").textContent = "conectado"; };
+  es.onerror = () => { $("con").classList.remove("ok"); $("con-txt").textContent = "reconectando…"; };
+  es.onmessage = ev => { snap = JSON.parse(ev.data); offset = snap.agora - Date.now() / 1000; desenharTudo(); };
+}
+conectar();
+
+// relogio, itens que expiram, caixas e idade do dado
+setInterval(() => { desenharTempo(); }, 200);
+setInterval(() => { if (snap) { desenharItens(); desenharBateria(); desenharRodape(); desenharMapa(); } }, 500);
+(function quadro() { desenharCaixas(); requestAnimationFrame(quadro); })();
+
+// F = tela cheia
+addEventListener("keydown", ev => { if (ev.key === "f" || ev.key === "F") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); });
+</script>
+</body>
+</html>

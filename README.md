@@ -7,3 +7,4 @@ Códigos de apoio temporários.
 - `servo_web/`: controle do servo pelo navegador (instruções no README da pasta)
 - `visao/`: calibração da câmera, AprilTag e YOLO (vindos de [STimmy10/Robotica](https://github.com/STimmy10/Robotica))
 - `visao/pi/`: teste do detector (YOLO26n em NCNN) + AprilTag no Raspberry Pi via SSH. Passo a passo e resultados em `visao/pi/NOTAS_PI.md`. Os modelos (`visao/pi/models/`) ficam fora do git e vão para o Pi por `scp`
+- `dashboard/`: painel do robô para a tela (vista superior, câmera, modo, itens, tempo, bateria), atualizado por JSON. Ver `dashboard/README.md`
