@@ -2,7 +2,8 @@
 """
 Processa no computador o video que o Raspberry Pi transmite (camera_server.py):
   - YOLO (nano_LR.pt): caixas de ampulheta, anel_base, anel_haste, cilindro, icosaedro, peca_chata
-  - AprilTag (tag25h9 e tag36h11): contorno, ID e distancia ate a camera
+  - AprilTag: calculada NO PI (camera_server.py publica em /tags) e so desenhada aqui.
+    Com --tags-local (ou com --cam/--arquivo) a tag e calculada aqui mesmo.
 
 Uso:
     python detector_pc.py --pi 192.168.1.70          # video do Pi
@@ -11,7 +12,7 @@ Uso:
 
 Teclas na janela:
     q / Esc  sair                 s  salvar imagem em pc/capturas/
-    c        ajustar distancia: deixe UMA tag a --dist-ref cm da camera e aperte c
+    c        ajustar distancia: deixe UMA tag a --dist-ref cm da camera e aperte c (o ajuste fica salvo no Pi)
     r        zerar o ajuste       y / a  liga/desliga YOLO / AprilTag
     + / -    confianca minima do YOLO
 """
@@ -41,10 +42,11 @@ p.add_argument("--modelo", default=MODELO_PADRAO)
 p.add_argument("--imgsz", type=int, default=512, help="o modelo foi treinado em 512")
 p.add_argument("--conf", type=float, default=0.50)
 p.add_argument("--device", default="auto", help="auto, mps, cpu ou cuda")
-p.add_argument("--tag-familias", default="25h9,36h11", help="familias de AprilTag (a do lab e 25h9)")
+p.add_argument("--tags-local", action="store_true", help="calcula a AprilTag aqui em vez de usar a do Pi")
+p.add_argument("--tag-familias", default="25h9,36h11", help="(so com tag local) familias de AprilTag")
 p.add_argument("--tag-mm", type=float, default=100.0, help="lado da tag em mm: borda preta externa, sem a margem branca")
 p.add_argument("--tag-ids", default=None, help="so considerar esses IDs (ex.: 5,7)")
-p.add_argument("--camera", default=None, help="JSON de calibracao (padrao: camera_pi.json, senao camera_lab.json)")
+p.add_argument("--camera", default=None, help="JSON de calibracao (padrao: visao/pi/camera_pi.json, senao camera_lab.json)")
 p.add_argument("--dist-ref", type=float, default=50.0, help="distancia real (cm) usada na tecla c")
 p.add_argument("--sem-janela", action="store_true", help="nao abre janela (so terminal)")
 p.add_argument("--quadros", type=int, default=0, help="para depois de N quadros processados (0 = infinito)")
@@ -108,12 +110,18 @@ tags_det = vl.TagDetector(args.tag_familias.split(","), args.tag_mm, ids)
 escala = vl.carregar_escala()
 log(f"[camera] {os.path.basename(cam.path)}: fx={cam.K0[0,0]:.0f} fy={cam.K0[1,1]:.0f} "
     f"(~{cam.hfov:.0f} graus de campo) {'com' if cam.has_dist else 'sem'} correcao de distorcao")
-log(f"[tag] familias {args.tag_familias}, lado {args.tag_mm:.0f} mm, ajuste de escala x{escala:.3f}")
 
 # --------------------------------------------------------------------------- fonte
 src = vl.abrir_fonte(args)
 nome_fonte = getattr(src, "url", None) or str(args.arquivo or f"webcam {args.cam}")
 log(f"[fonte] {nome_fonte}")
+pitags = None
+if isinstance(src, vl.StreamReader) and not args.tags_local:
+    pitags = vl.PiTags(src.base)
+    pitags.start()
+    log("[tag] AprilTag calculada no Pi (lida de /tags); lado/familias/escala definidos no Pi")
+else:
+    log(f"[tag] AprilTag local: {args.tag_familias}, lado {args.tag_mm:.0f} mm, escala x{escala:.3f}")
 
 
 # --------------------------------------------------------------------------- desenho
@@ -229,20 +237,31 @@ try:
                         dets.append({"xyxy": b, "conf": float(c), "cls": int(k), "nome": NAMES.get(int(k), str(k))})
 
         tags = []
-        if usar_tag:
+        snap = None
+        if usar_tag and pitags is not None:
+            tags, snap = pitags.tags()
+        elif usar_tag:
             tt = time.perf_counter()
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            tags = tags_det.detect(gray, K, escala)
+            tags = tags_det.detect(gray, K, escala=escala)
             tag_hist.append((time.perf_counter() - tt) * 1000)
 
         t_proc.append(time.perf_counter())
         lat_hist.append((time.time() - t_cap) * 1000)
         fps_proc = (len(t_proc) - 1) / (t_proc[-1] - t_proc[0]) if len(t_proc) > 1 and t_proc[-1] > t_proc[0] else 0.0
 
+        if pitags is not None:
+            if snap:
+                tag_txt = (f"Tag NO PI {'on ' if usar_tag else 'off'} {snap.get('fps', 0):4.1f} fps {snap.get('proc_ms', 0):3.0f} ms  |  "
+                           f"lado {snap.get('tag_mm') or 0:.0f} mm, escala x{snap.get('escala') or 1:.3f}")
+            else:
+                tag_txt = f"Tag NO PI: {pitags.status[:60]}"
+        else:
+            tag_txt = (f"Tag local {'on ' if usar_tag else 'off'} {np.mean(tag_hist) if tag_hist else 0:3.0f} ms  |  "
+                       f"lado {args.tag_mm:.0f} mm, escala x{escala:.3f}")
         hud = [
             f"{nome_fonte}  |  video {src.fps:4.1f} fps  |  processado {fps_proc:4.1f} fps  |  atraso {np.mean(lat_hist):4.0f} ms",
-            f"YOLO {'on ' if usar_yolo else 'off'} {np.mean(yolo_hist) if yolo_hist else 0:4.0f} ms ({DEVICE}, conf {args.conf:.2f})  |  "
-            f"Tag {'on ' if usar_tag else 'off'} {np.mean(tag_hist) if tag_hist else 0:3.0f} ms  |  lado {args.tag_mm:.0f} mm, escala x{escala:.3f}",
+            f"YOLO {'on ' if usar_yolo else 'off'} {np.mean(yolo_hist) if yolo_hist else 0:4.0f} ms ({DEVICE}, conf {args.conf:.2f})  |  {tag_txt}",
         ]
         if time.time() > msg_ate:
             msg = ""
@@ -272,6 +291,12 @@ try:
                 cv2.imwrite(fn, anot)
                 cv2.imwrite(fn.replace(".jpg", "_cru.jpg"), frame)
                 mostrar_msg(f"salvo {os.path.relpath(fn)}")
+            elif k == ord("c") and pitags is not None:
+                r = pitags.calibrar(args.dist_ref)
+                mostrar_msg(("ajuste salvo no Pi: " if r.get("ok") else "ajuste falhou: ") + r.get("msg", ""), 6)
+            elif k == ord("r") and pitags is not None:
+                r = pitags.zerar()
+                mostrar_msg(r.get("msg", ""))
             elif k == ord("c"):
                 validas = [t for t in tags if "dist_raw_m" in t]
                 if len(validas) != 1:
@@ -306,6 +331,8 @@ except KeyboardInterrupt:
     pass
 finally:
     src.stop()
+    if pitags is not None:
+        pitags.stop()
     if not args.sem_janela:
         cv2.destroyAllWindows()
     if lat_hist:

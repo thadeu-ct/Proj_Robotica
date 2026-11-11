@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Servidor de camera do Raspberry Pi. So captura e transmite: nenhum modelo roda aqui.
-O processamento (YOLO + AprilTag) roda no computador com visao/pc/detector_pc.py.
+Servidor de camera do Raspberry Pi.
+  - transmite o video (MJPEG) para o computador, que roda o YOLO (visao/pc/detector_pc.py)
+  - roda a AprilTag AQUI no Pi (apriltag_pi.py) e publica distancia/angulo em /tags,
+    para o controle autonomo nao depender do computador
 
 Uso no Pi:
     python camera_server.py                 # webcam USB, 640x480, porta 8080
@@ -13,6 +15,9 @@ Endpoints:
     /stream     MJPEG (cada quadro leva X-Timestamp e X-Seq)
     /frame.jpg  ultimo quadro
     /status     JSON com fps, resolucao e hora do Pi
+    /tags       JSON com as tags do ultimo quadro processado (?depois=N espera um resultado mais novo que N)
+    /calibrar?ref=50   ajusta a escala da distancia com UMA tag a 50 cm
+    /zerar      zera o ajuste
 
 Depende so de OpenCV, NumPy e da biblioteca padrao (Python 3.8+).
 """
@@ -38,6 +43,12 @@ p.add_argument("--max-fps", type=float, default=20, help="limite de quadros envi
 p.add_argument("--quality", type=int, default=80, help="qualidade JPEG (50-95)")
 p.add_argument("--port", type=int, default=8080)
 p.add_argument("--bind", default="0.0.0.0")
+p.add_argument("--sem-tags", action="store_true", help="nao roda a AprilTag no Pi")
+p.add_argument("--tag-familias", default="25h9", help="a tag do lab e 25h9; use 25h9,36h11 para as duas")
+p.add_argument("--tag-mm", type=float, default=100.0, help="lado da tag em mm (borda preta, sem margem branca)")
+p.add_argument("--tag-ids", default=None, help="so considerar esses IDs (ex.: 5)")
+p.add_argument("--camera", default=None, help="JSON de calibracao (padrao: camera_pi.json, senao camera_lab.json)")
+p.add_argument("--log-tags", type=float, default=1.0, help="imprime as tags no terminal a cada N s (0 desliga)")
 args = p.parse_args()
 
 IS_LINUX = sys.platform.startswith("linux")
@@ -92,10 +103,12 @@ class Latest:
         self.clients = 0
         self.cam_ok = False
         self.cam_name = ""
+        self.frame = None
 
-    def put(self, jpg, ts, w, h):
+    def put(self, jpg, ts, w, h, frame=None):
         with self.cond:
             self.jpg, self.ts, self.w, self.h = jpg, ts, w, h
+            self.frame = frame
             self.seq += 1
             self.cond.notify_all()
 
@@ -105,9 +118,90 @@ class Latest:
                 self.cond.wait(timeout)
             return self.jpg, self.seq, self.ts
 
+    def wait_frame(self, last_seq, timeout=1.0):
+        with self.cond:
+            if self.seq == last_seq:
+                self.cond.wait(timeout)
+            return self.frame, self.seq, self.ts
+
 
 latest = Latest()
 running = True
+
+
+# --------------------------------------------------------------------------- AprilTag no Pi
+class TagState:
+    """Resultado mais recente da AprilTag. O controle dos motores vai ler daqui (ou usar TagRunner direto)."""
+
+    def __init__(self):
+        self.cond = threading.Condition()
+        self.res_seq = 0          # contador de resultados
+        self.frame_seq = 0        # quadro de origem
+        self.ts_frame = 0.0
+        self.ts_done = 0.0
+        self.tags = []            # objetos completos (com numpy)
+        self.json_tags = []
+        self.proc_ms = 0.0
+        self.fps = 0.0
+        self.erro = ""
+
+    def put(self, frame_seq, ts_frame, tags, json_tags, proc_ms):
+        with self.cond:
+            self.frame_seq, self.ts_frame, self.tags, self.json_tags, self.proc_ms = frame_seq, ts_frame, tags, json_tags, proc_ms
+            self.ts_done = time.time()
+            self.res_seq += 1
+            self.cond.notify_all()
+
+    def snapshot(self, depois=None, timeout=1.0):
+        with self.cond:
+            if depois is not None and self.res_seq <= depois:
+                self.cond.wait(timeout)
+            return {
+                "seq": self.res_seq, "frame_seq": self.frame_seq, "ts_frame": self.ts_frame, "ts_done": self.ts_done,
+                "proc_ms": round(self.proc_ms, 1), "fps": round(self.fps, 1), "tags": self.json_tags,
+                "tag_mm": runner.det.tag_mm if runner else None, "escala": round(runner.escala, 4) if runner else None,
+                "erro": self.erro, "time": time.time(),
+            }
+
+
+tagstate = TagState()
+runner = None
+if not args.sem_tags:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import apriltag_pi  # noqa: E402
+
+    _ids = [int(x) for x in args.tag_ids.split(",")] if args.tag_ids else None
+    runner = apriltag_pi.TagRunner(args.tag_familias.split(","), args.tag_mm, _ids, args.camera)
+
+
+def tag_loop():
+    last = -1
+    n, t_fps = 0, time.time()
+    t_log = 0.0
+    while running:
+        frame, seq, ts = latest.wait_frame(last)
+        if frame is None or seq == last:
+            continue
+        last = seq
+        t0 = time.perf_counter()
+        try:
+            tags = runner.process(frame)
+            tagstate.erro = ""
+        except Exception as e:                      # nunca derruba o servidor por causa da tag
+            tags = []
+            tagstate.erro = f"{e.__class__.__name__}: {e}"
+        ms = (time.perf_counter() - t0) * 1000
+        tagstate.put(seq, ts, tags, [apriltag_pi.tag_para_json(t) for t in tags], ms)
+        n += 1
+        now = time.time()
+        if now - t_fps >= 2.0:
+            tagstate.fps = n / (now - t_fps)
+            n, t_fps = 0, now
+        if args.log_tags and now - t_log >= args.log_tags:
+            txt = "  |  ".join(f"ID {t['id']} {t['dist_m'] * 100:5.1f} cm {t['angulo_deg']:+4.0f} graus"
+                               for t in tags if "dist_m" in t) or "nenhuma tag"
+            log(f"[tag] {tagstate.fps:4.1f} fps {ms:3.0f} ms | {txt}" + (f" | ERRO {tagstate.erro}" if tagstate.erro else ""))
+            t_log = now
 
 
 def capture_loop():
@@ -178,7 +272,7 @@ def capture_loop():
         ok, buf = cv2.imencode(".jpg", frame, params)
         if not ok:
             continue
-        latest.put(buf.tobytes(), ts, frame.shape[1], frame.shape[0])
+        latest.put(buf.tobytes(), ts, frame.shape[1], frame.shape[0], frame)
 
         n += 1
         if ts - t_fps >= 2.0:
@@ -220,6 +314,36 @@ class Handler(BaseHTTPRequestHandler):
                 "time": time.time(), "host": socket.gethostname(),
             }).encode()
             return self._send(200, "application/json", body)
+        if path == "/tags":
+            if runner is None:
+                return self._send(404, "application/json", b'{"erro": "AprilTag desligada (--sem-tags)"}')
+            depois = None
+            q = self.path.split("?", 1)[1] if "?" in self.path else ""
+            for kv in q.split("&"):
+                if kv.startswith("depois="):
+                    try:
+                        depois = int(kv.split("=", 1)[1])
+                    except ValueError:
+                        pass
+            return self._send(200, "application/json", json.dumps(tagstate.snapshot(depois)).encode())
+        if path in ("/calibrar", "/zerar"):
+            if runner is None:
+                return self._send(404, "application/json", b'{"ok": false, "msg": "AprilTag desligada"}')
+            if path == "/zerar":
+                runner.zerar()
+                ok, msg = True, "ajuste zerado (escala x1.000)"
+            else:
+                ref = 50.0
+                q = self.path.split("?", 1)[1] if "?" in self.path else ""
+                for kv in q.split("&"):
+                    if kv.startswith("ref="):
+                        try:
+                            ref = float(kv.split("=", 1)[1])
+                        except ValueError:
+                            pass
+                ok, msg = runner.calibrar(tagstate.tags, ref)
+            log(f"[ajuste] {msg}")
+            return self._send(200, "application/json", json.dumps({"ok": ok, "msg": msg}).encode())
         if path == "/frame.jpg":
             jpg, _, ts = latest.wait_new(-1, 0)
             if jpg is None:
@@ -265,6 +389,10 @@ def main():
     global running
     t = threading.Thread(target=capture_loop, daemon=True)
     t.start()
+    if runner is not None:
+        threading.Thread(target=tag_loop, daemon=True).start()
+        log(f"[tag] AprilTag no Pi: {args.tag_familias}, lado {args.tag_mm:.0f} mm, camera "
+            f"{os.path.basename(runner.cam.path)} (fx {runner.cam.K0[0, 0]:.0f}), escala x{runner.escala:.3f}")
     srv = None
     for tentativa in range(20):              # um servidor antigo pode estar terminando de fechar
         try:

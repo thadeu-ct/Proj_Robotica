@@ -10,3 +10,4 @@ visao/pc/.venv/
 visao/pc/capturas/
 visao/pc/ajuste_distancia.json
 camera_server.log
+visao/pi/ajuste_distancia.json

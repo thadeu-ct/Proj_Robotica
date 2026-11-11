@@ -5,6 +5,8 @@
 # Ver a saida do servidor: tmux attach -t cam   (sair sem parar: Ctrl+B, depois D)
 set -u
 PORTA="${1:-8080}"
+[ $# -gt 0 ] && shift
+EXTRA="$*"          # repassado ao camera_server.py (ex.: --tag-mm 80)
 export LC_ALL=C.UTF-8 LANG=C.UTF-8
 cd "$(dirname "$0")" || exit 1
 
@@ -35,7 +37,7 @@ for _ in $(seq 1 20); do pgrep -f camera_server.py >/dev/null || break; sleep 0.
 ls /dev/video* >/dev/null 2>&1 || echo "   (aviso) nenhuma /dev/video*: a webcam esta conectada?"
 
 : > camera_server.log
-CMD="cd '$PWD' && '$PY' camera_server.py --port $PORTA 2>&1 | tee camera_server.log"
+CMD="cd '$PWD' && '$PY' camera_server.py --port $PORTA $EXTRA 2>&1 | tee camera_server.log"
 if command -v tmux >/dev/null; then
   tmux new-session -d -s cam -c "$PWD" "$CMD" </dev/null
   echo "   rodando no tmux 'cam' (ver no Pi: tmux attach -t cam ; sair sem parar: Ctrl+B depois D)"

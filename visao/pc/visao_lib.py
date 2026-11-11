@@ -5,6 +5,7 @@ modelo da camera (intrinsecos) e detector de AprilTag com distancia.
 import json
 import math
 import os
+import sys
 import threading
 import time
 import urllib.request
@@ -256,82 +257,71 @@ def escolher_camera(path=None):
     if path:
         return Camera(path)
     for nome in ("camera_pi.json", "camera_lab.json"):
-        p = os.path.join(AQUI, nome)
+        p = os.path.join(AQUI, "..", "pi", nome)
         if os.path.exists(p):
-            return Camera(p)
-    raise SystemExit("nenhum arquivo de camera (camera_pi.json / camera_lab.json) em visao/pc/")
+            return Camera(os.path.normpath(p))
+    raise SystemExit("nenhum arquivo de camera (camera_pi.json / camera_lab.json) em visao/pi/")
 
 
 # =========================================================================== AprilTag
-FAMILIAS = {
-    "25h9": cv2.aruco.DICT_APRILTAG_25h9,
-    "36h11": cv2.aruco.DICT_APRILTAG_36h11,
-    "16h5": cv2.aruco.DICT_APRILTAG_16h5,
-    "36h10": cv2.aruco.DICT_APRILTAG_36h10,
-}
+# Uma implementacao so: a mesma que roda no Pi (visao/pi/apriltag_pi.py).
+sys.path.insert(0, os.path.join(AQUI, "..", "pi"))
+from apriltag_pi import FAMILIAS, TagDetector, carregar_escala, salvar_escala, ESCALA_PATH  # noqa: E402,F401
 
 
-class TagDetector:
-    """
-    Detecta AprilTags com o modulo aruco do OpenCV (nas fotos do lab ele achou a tag25h9
-    onde o pupil-apriltags falhou) e estima a pose com solvePnP (IPPE_SQUARE).
-    Distancia = |t| (do centro optico da camera ao centro da tag), vezes a escala de ajuste.
-    """
+class PiTags(threading.Thread):
+    """Busca em /tags do Pi o resultado da AprilTag calculada LA (long-poll: chega assim que sai)."""
 
-    def __init__(self, familias=("25h9", "36h11"), tag_mm=100.0, ids=None):
-        self.tag_mm = float(tag_mm)
-        self.ids = set(ids) if ids else None
-        self.dets = []
-        for f in familias:
-            f = f.lower().replace("tag", "")
-            if f not in FAMILIAS:
-                raise SystemExit(f"familia desconhecida: {f} (use {', '.join(FAMILIAS)})")
-            p = cv2.aruco.DetectorParameters()
-            p.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-            self.dets.append((f, cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(FAMILIAS[f]), p)))
+    def __init__(self, base):
+        super().__init__(daemon=True)
+        self.base = base.rstrip("/")
+        self.snap = None
+        self.t_recv = 0.0
+        self.status = "aguardando o Pi"
+        self.running = True
 
-    def detect(self, gray, K, escala=1.0):
-        s = self.tag_mm / 1000.0
-        obj = np.array([[-s / 2, s / 2, 0], [s / 2, s / 2, 0], [s / 2, -s / 2, 0], [-s / 2, -s / 2, 0]], dtype=np.float64)
+    def run(self):
+        seq = 0
+        while self.running:
+            try:
+                with urllib.request.urlopen(f"{self.base}/tags?depois={seq}", timeout=3) as r:
+                    snap = json.loads(r.read().decode())
+                seq = snap.get("seq", 0)
+                self.snap, self.t_recv = snap, time.time()
+                self.status = "ok" if not snap.get("erro") else f"erro no Pi: {snap['erro']}"
+            except Exception as e:
+                self.status = f"sem /tags do Pi ({e.__class__.__name__}: {e})"
+                time.sleep(1.0)
+
+    def tags(self):
+        """Tags no mesmo formato do TagDetector (para desenhar)."""
+        snap = self.snap
+        if not snap or time.time() - self.t_recv > 2.0:
+            return [], snap
         out = []
-        for fam, det in self.dets:
-            corners, ids, _ = det.detectMarkers(gray)
-            if ids is None:
-                continue
-            for c, i in zip(corners, ids.ravel()):
-                i = int(i)
-                if self.ids and i not in self.ids:
-                    continue
-                pts = c.reshape(4, 2).astype(np.float64)
-                tag = {"familia": fam, "id": i, "corners": pts, "center": pts.mean(0)}
-                ok, rvec, tvec = cv2.solvePnP(obj, pts, K, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)
-                if ok:
-                    t = tvec.ravel()
-                    raw = float(np.linalg.norm(t))
-                    tag.update(
-                        rvec=rvec, tvec=tvec,
-                        dist_raw_m=raw,
-                        dist_m=raw * escala,
-                        x_m=float(t[0]) * escala, y_m=float(t[1]) * escala, z_m=float(t[2]) * escala,
-                        angulo_deg=float(math.degrees(math.atan2(t[0], t[2]))),   # + = tag a direita
-                        lado_px=float(np.mean([np.linalg.norm(pts[k] - pts[(k + 1) % 4]) for k in range(4)])),
-                    )
-                out.append(tag)
-        return out
+        for t in snap.get("tags", []):
+            d = {"id": t["id"], "familia": t["familia"], "corners": np.array(t["corners"], dtype=np.float64),
+                 "center": np.array(t["center"], dtype=np.float64)}
+            if "dist_cm" in t:
+                d.update(dist_m=t["dist_cm"] / 100, dist_raw_m=t["dist_raw_cm"] / 100, angulo_deg=t["angulo_deg"],
+                         x_m=t["x_cm"] / 100, z_m=t["z_cm"] / 100,
+                         rvec=np.array(t["rvec"], dtype=np.float64).reshape(3, 1),
+                         tvec=np.array(t["tvec"], dtype=np.float64).reshape(3, 1))
+            out.append(d)
+        return out, snap
 
+    def _get(self, path):
+        try:
+            with urllib.request.urlopen(self.base + path, timeout=3) as r:
+                return json.loads(r.read().decode())
+        except Exception as e:
+            return {"ok": False, "msg": f"falha falando com o Pi: {e}"}
 
-# =========================================================================== ajuste de escala da distancia
-ESCALA_PATH = os.path.join(AQUI, "ajuste_distancia.json")
+    def calibrar(self, ref_cm):
+        return self._get(f"/calibrar?ref={ref_cm}")
 
+    def zerar(self):
+        return self._get("/zerar")
 
-def carregar_escala():
-    try:
-        with open(ESCALA_PATH) as f:
-            return float(json.load(f)["escala"])
-    except Exception:
-        return 1.0
-
-
-def salvar_escala(escala, info):
-    with open(ESCALA_PATH, "w") as f:
-        json.dump({"escala": escala, **info, "quando": time.strftime("%Y-%m-%d %H:%M:%S")}, f, indent=2)
+    def stop(self):
+        self.running = False

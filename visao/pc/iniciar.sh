@@ -5,7 +5,8 @@
 #   ./iniciar.sh                      # Pi em 192.168.1.70, usuario puc
 #   ./iniciar.sh 192.168.1.80         # outro IP
 #   PI_USER=pi ./iniciar.sh           # outro usuario
-#   ./iniciar.sh 192.168.1.70 --tag-mm 80     # o que vier depois do IP vai para o detector_pc.py
+#   TAG_MM=80 ./iniciar.sh            # lado da tag em mm (a AprilTag roda NO Pi)
+#   ./iniciar.sh 192.168.1.70 --conf 0.6      # o que vier depois do IP vai para o detector_pc.py
 #   ./iniciar.sh local                # teste sem Pi: webcam deste computador
 #
 # Pede a senha do Pi no maximo uma vez (a conexao SSH fica aberta e e reaproveitada).
@@ -17,6 +18,8 @@ PI_USER="${PI_USER:-puc}"
 PORTA="${PORTA:-8080}"
 PORTA_TUNEL="${PORTA_TUNEL:-18080}"
 DIR_PI="${DIR_PI:-yolo/robotica}"      # relativo a home do usuario no Pi
+TAG_MM="${TAG_MM:-100}"
+TAG_FAMILIAS="${TAG_FAMILIAS:-25h9}"
 
 PC="$(cd "$(dirname "$0")" && pwd)"
 VISAO="$(cd "$PC/.." && pwd)"
@@ -54,12 +57,14 @@ if ! ssh "${SSH_OPTS[@]}" "$DEST" true; then
     || die "o Pi nao responde em $PI_IP. Mesmo Wi-Fi? IP mudou? No Pi: hostname -I"
 fi
 
-say "Enviando camera_server.py e iniciar_servidor.sh para ~/$DIR_PI"
+ARQS=("$VISAO/pi/camera_server.py" "$VISAO/pi/apriltag_pi.py" "$VISAO/pi/iniciar_servidor.sh" "$VISAO/pi/camera_lab.json")
+[ -f "$VISAO/pi/camera_pi.json" ] && ARQS+=("$VISAO/pi/camera_pi.json")
+say "Enviando ${#ARQS[@]} arquivos para ~/$DIR_PI"
 ssh "${SSH_OPTS[@]}" "$DEST" "mkdir -p $DIR_PI" </dev/null
-scp -q "${SSH_OPTS[@]}" "$VISAO/pi/camera_server.py" "$VISAO/pi/iniciar_servidor.sh" "$DEST:$DIR_PI/"
+scp -q "${SSH_OPTS[@]}" "${ARQS[@]}" "$DEST:$DIR_PI/"
 
 say "Iniciando o servidor de camera no Pi"
-ssh "${SSH_OPTS[@]}" "$DEST" "bash $DIR_PI/iniciar_servidor.sh $PORTA" </dev/null \
+ssh "${SSH_OPTS[@]}" "$DEST" "bash $DIR_PI/iniciar_servidor.sh $PORTA --tag-mm $TAG_MM --tag-familias $TAG_FAMILIAS" </dev/null \
   || die "o servidor de camera nao subiu no Pi (mensagem acima). Para ver de perto: ssh $DEST  e  tmux attach -t cam"
 
 # ---------------------------------------------------------------- caminho do video: direto ou por tunel

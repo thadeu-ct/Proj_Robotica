@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Calibra a camera do Pi pelo video transmitido, com o tabuleiro de xadrez do lab (8x5 cantos internos).
-Gera visao/pc/camera_pi.json, que o detector_pc.py passa a usar no lugar do camera_lab.json.
+Gera visao/pi/camera_pi.json, que o Pi (AprilTag) e o detector_pc.py passam a usar no lugar do camera_lab.json.
+Depois de calibrar, rode ./iniciar.sh de novo para ele mandar o arquivo para o Pi.
 
 Uso:
     python calibrar_camera.py --pi 192.168.1.70
@@ -35,7 +36,7 @@ p.add_argument("--arquivo", default=None)
 p.add_argument("--colunas", type=int, default=8, help="cantos internos na horizontal (tabuleiro do lab: 8)")
 p.add_argument("--linhas", type=int, default=5, help="cantos internos na vertical (tabuleiro do lab: 5)")
 p.add_argument("--quadrado-mm", type=float, default=25.0, help="nao afeta a distancia focal; so a escala das poses")
-p.add_argument("--saida", default=os.path.join(AQUI, "camera_pi.json"))
+p.add_argument("--saida", default=os.path.normpath(os.path.join(AQUI, "..", "pi", "camera_pi.json")))
 p.add_argument("--min", type=int, default=10)
 p.add_argument("--auto", action="store_true", help="captura sozinho e calcula ao chegar em --alvo capturas")
 p.add_argument("--alvo", type=int, default=20, help="no modo --auto, calcula e salva com esse numero de capturas")
