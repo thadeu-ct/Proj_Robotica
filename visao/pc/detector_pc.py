@@ -7,7 +7,7 @@ Processa no computador o video que o Raspberry Pi transmite (camera_server.py):
 
 Uso:
     python detector_pc.py --pi 192.168.1.70          # video MJPEG do Pi
-    python detector_pc.py --udp udp://127.0.0.1:5001 --saida-mjpeg 8091
+    python detector_pc.py --udp udp://127.0.0.1:5001 --saida-mjpeg 8091 --dashboard http://127.0.0.1:8000
                                                      # video H.264 (copia local do relay da GS) e
                                                      # video anotado em http://127.0.0.1:8091/stream
     python detector_pc.py --cam 0                    # webcam deste computador (teste sem Pi)
@@ -61,6 +61,8 @@ p.add_argument("--salvar-cada", type=int, default=0, help="salva imagem anotada 
 p.add_argument("--largura-janela", type=int, default=960)
 p.add_argument("--saida-mjpeg", type=int, default=0, help="publica o video ANOTADO em http://127.0.0.1:PORTA/stream (dashboard)")
 p.add_argument("--saida-bind", default="127.0.0.1", help="interface da saida anotada (0.0.0.0 para outros computadores)")
+p.add_argument("--dashboard", default=None,
+               help="URL do dashboard (ex.: http://127.0.0.1:8000): acende o icone de cada item reconhecido")
 args = p.parse_args()
 
 CAPTURAS = os.path.join(AQUI, "capturas")
@@ -289,6 +291,49 @@ if args.saida_mjpeg:
     threading.Thread(target=_srv.serve_forever, daemon=True).start()
     log(f"[saida] video anotado em http://{args.saida_bind}:{args.saida_mjpeg}/stream")
 
+# --------------------------------------------------------------------------- itens para o dashboard
+class EnvioDashboard:
+    """Manda os itens reconhecidos para o dashboard (POST /api/estado {"deteccoes": [...]}) a ~4 Hz,
+    numa thread, para nunca atrasar o video. O dashboard acende o icone da classe e apaga sozinho
+    1,5 s depois do ultimo envio, entao basta mandar enquanto o item estiver na imagem.
+    'classe' vai com o nome do MODELO (os icones do dashboard usam esses nomes); 'artifact' leva o do contrato.
+    Sem 'caixa': o video ja vem anotado, e caixas duplicadas atrapalhariam."""
+
+    def __init__(self, url, hz=4.0):
+        import threading
+        import urllib.request
+        self._req = urllib.request
+        self.url = url.rstrip("/") + "/api/estado"
+        self.dt = 1.0 / hz
+        self.itens, self.versao, self.enviada = [], 0, 0
+        self.erros = 0
+        threading.Thread(target=self._laco, daemon=True).start()
+
+    def atualizar(self, dets):
+        self.itens = [{"classe": d["nome"], "artifact": d["artefato"], "conf": round(d["conf"], 2)} for d in dets]
+        self.versao += 1
+
+    def _laco(self):
+        while True:
+            time.sleep(self.dt)
+            if self.versao == self.enviada or not self.itens:
+                continue                       # nada novo, ou nada na imagem (o icone apaga sozinho)
+            self.enviada = self.versao
+            try:
+                req = self._req.Request(self.url, data=json.dumps({"deteccoes": self.itens}).encode(),
+                                        headers={"Content-Type": "application/json"}, method="POST")
+                self._req.urlopen(req, timeout=1).read()
+                self.erros = 0
+            except Exception as e:
+                self.erros += 1
+                if self.erros in (1, 50):
+                    log(f"[dashboard] falha enviando itens para {self.url}: {e}")
+
+
+dash = EnvioDashboard(args.dashboard) if args.dashboard else None
+if dash:
+    log(f"[dashboard] itens reconhecidos -> {dash.url}")
+
 # --------------------------------------------------------------------------- loop
 JANELA = "Visao Robotica (q sai)"
 if not args.sem_janela:
@@ -384,6 +429,8 @@ try:
         anot = img.copy()
         desenhar(anot, dets, tags, hud, msg)
         ultimo = (anot, tags)
+        if dash is not None:
+            dash.atualizar(dets)
         if saida is not None:
             saida.deteccoes = {
                 "ts": time.time(),

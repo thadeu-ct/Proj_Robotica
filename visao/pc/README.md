@@ -77,7 +77,7 @@ A associação foi feita pelo formato das peças nas fotos do dataset. Se a orga
 
 ## Opções úteis do `detector_pc.py`
 
-`--pi IP` · `--udp URL` · `--url URL_MJPEG` · `--cam 0` · `--arquivo foto_ou_video` · `--tags-local` (calcula a tag no Mac) · `--conf 0.5` · `--imgsz 512` (tamanho do treino) · `--classes arquivo.json` · `--saida-mjpeg PORTA` · `--sem-janela` · `--quadros N` · `--salvar-cada N`. Lista completa: `-h`.
+`--dashboard http://127.0.0.1:8000` (acende no dashboard o ícone de cada item reconhecido; ~4 Hz, apaga sozinho 1,5 s depois) · `--pi IP` · `--udp URL` · `--url URL_MJPEG` · `--cam 0` · `--arquivo foto_ou_video` · `--tags-local` (calcula a tag no Mac) · `--conf 0.5` · `--imgsz 512` (tamanho do treino) · `--classes arquivo.json` · `--saida-mjpeg PORTA` · `--sem-janela` · `--quadros N` · `--salvar-cada N`. Lista completa: `-h`.
 
 ## Problemas comuns
 
