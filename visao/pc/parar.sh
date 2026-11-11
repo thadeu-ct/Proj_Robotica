@@ -7,5 +7,5 @@ PI_USER="${PI_USER:-puc}"
 CTL="$HOME/.ssh/cm-robotica-%r@%h-%p"
 DEST="$PI_USER@$PI_IP"
 ssh -o ControlMaster=auto -o "ControlPath=$CTL" -o ConnectTimeout=8 "$DEST" \
-  'tmux kill-session -t cam 2>/dev/null; pkill -f camera_server.py 2>/dev/null; echo "servidor de camera parado"'
+  'tmux kill-session -t cam 2>/dev/null; pkill -f '[c]amera_server.py' 2>/dev/null; echo "servidor de camera parado"'
 ssh -o "ControlPath=$CTL" -O exit "$DEST" 2>/dev/null || true

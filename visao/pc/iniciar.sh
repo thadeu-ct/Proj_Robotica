@@ -18,7 +18,7 @@ PI_USER="${PI_USER:-puc}"
 PORTA="${PORTA:-8080}"
 PORTA_TUNEL="${PORTA_TUNEL:-18080}"
 DIR_PI="${DIR_PI:-yolo/robotica}"      # relativo a home do usuario no Pi
-TAG_MM="${TAG_MM:-100}"
+TAG_MM="${TAG_MM:-42}"         # tag do lab: 4,2 cm de borda preta (medida em 11/11)
 TAG_FAMILIAS="${TAG_FAMILIAS:-25h9}"
 
 PC="$(cd "$(dirname "$0")" && pwd)"

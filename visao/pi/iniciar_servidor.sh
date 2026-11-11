@@ -26,13 +26,13 @@ else
 fi
 
 # libera a camera e a porta
-if pgrep -f teste_visao.py >/dev/null; then
+if pgrep -f '[t]este_visao.py' >/dev/null; then
   echo "   teste_visao.py estava usando a camera: encerrando"
-  pkill -f teste_visao.py
+  pkill -f '[t]este_visao.py'
 fi
 tmux kill-session -t cam </dev/null 2>/dev/null
-pkill -f camera_server.py 2>/dev/null
-for _ in $(seq 1 20); do pgrep -f camera_server.py >/dev/null || break; sleep 0.25; done
+pkill -f '[c]amera_server.py' 2>/dev/null
+for _ in $(seq 1 20); do pgrep -f '[c]amera_server.py' >/dev/null || break; sleep 0.25; done
 
 ls /dev/video* >/dev/null 2>&1 || echo "   (aviso) nenhuma /dev/video*: a webcam esta conectada?"
 

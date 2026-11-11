@@ -40,12 +40,13 @@ p.add_argument("--width", type=int, default=640)
 p.add_argument("--height", type=int, default=480)
 p.add_argument("--fps", type=float, default=30, help="fps pedido a camera")
 p.add_argument("--max-fps", type=float, default=20, help="limite de quadros enviados por segundo")
-p.add_argument("--quality", type=int, default=80, help="qualidade JPEG (50-95)")
+p.add_argument("--quality", type=int, default=65, help="qualidade JPEG (50-95); 65 cabe no Wi-Fi do Pi 3")
+p.add_argument("--sndbuf-kb", type=int, default=32, help="buffer de envio por cliente: pequeno = descarta quadros velhos em vez de acumular atraso")
 p.add_argument("--port", type=int, default=8080)
 p.add_argument("--bind", default="0.0.0.0")
 p.add_argument("--sem-tags", action="store_true", help="nao roda a AprilTag no Pi")
 p.add_argument("--tag-familias", default="25h9", help="a tag do lab e 25h9; use 25h9,36h11 para as duas")
-p.add_argument("--tag-mm", type=float, default=100.0, help="lado da tag em mm (borda preta, sem margem branca)")
+p.add_argument("--tag-mm", type=float, default=42.0, help="lado da tag em mm (borda preta, sem margem branca); a do lab tem 42")
 p.add_argument("--tag-ids", default=None, help="so considerar esses IDs (ex.: 5)")
 p.add_argument("--camera", default=None, help="JSON de calibracao (padrao: camera_pi.json, senao camera_lab.json)")
 p.add_argument("--log-tags", type=float, default=1.0, help="imprime as tags no terminal a cada N s (0 desliga)")
@@ -360,6 +361,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            # buffer pequeno: se o Wi-Fi nao der vazao, o write bloqueia e o proximo envio ja pega o quadro
+            # mais novo (os intermediarios sao descartados) em vez de acumular segundos de video na fila
+            self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, args.sndbuf_kb * 1024)
         except OSError:
             pass
         latest.clients += 1
