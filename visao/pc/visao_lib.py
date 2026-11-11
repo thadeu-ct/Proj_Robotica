@@ -200,9 +200,49 @@ class LocalReader(_Base):
                 time.sleep(1 / 30)
 
 
+class UdpReader(_Base):
+    """H.264/MPEG-TS por UDP (copia local do relay da ground station, ex.: udp://127.0.0.1:5001).
+    Sem relogio do Pi: o atraso mostrado conta so a partir da chegada aqui."""
+
+    def __init__(self, url):
+        super().__init__()
+        self.url = url
+        self.connected = False
+
+    def run(self):
+        # baixa latencia: sem buffer de entrada no demuxer/decoder do FFmpeg
+        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "fflags;nobuffer|flags;low_delay")
+        while self.running:
+            self.status = f"esperando video H.264 em {self.url}"
+            cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
+            if not cap.isOpened():
+                self.connected = False
+                time.sleep(1.0)
+                continue
+            self.connected = True
+            self.status = "recebendo H.264"
+            falhas = 0
+            while self.running:
+                ok, f = cap.read()
+                if not ok or f is None:
+                    falhas += 1
+                    if falhas > 30:
+                        break
+                    time.sleep(0.02)
+                    continue
+                falhas = 0
+                self._put(f, time.time())
+            cap.release()
+            self.connected = False
+            self.status = "H.264 parou de chegar; reabrindo"
+            time.sleep(0.5)
+
+
 def abrir_fonte(args):
-    """--url / --pi / --cam / --arquivo -> leitor ja iniciado."""
-    if getattr(args, "arquivo", None):
+    """--udp / --url / --pi / --cam / --arquivo -> leitor ja iniciado."""
+    if getattr(args, "udp", None):
+        r = UdpReader(args.udp)
+    elif getattr(args, "arquivo", None):
         r = LocalReader(args.arquivo)
     elif getattr(args, "cam", None) is not None:
         r = LocalReader(int(args.cam))

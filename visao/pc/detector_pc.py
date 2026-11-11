@@ -6,7 +6,10 @@ Processa no computador o video que o Raspberry Pi transmite (camera_server.py):
     Com --tags-local (ou com --cam/--arquivo) a tag e calculada aqui mesmo.
 
 Uso:
-    python detector_pc.py --pi 192.168.1.70          # video do Pi
+    python detector_pc.py --pi 192.168.1.70          # video MJPEG do Pi
+    python detector_pc.py --udp udp://127.0.0.1:5001 --saida-mjpeg 8091
+                                                     # video H.264 (copia local do relay da GS) e
+                                                     # video anotado em http://127.0.0.1:8091/stream
     python detector_pc.py --cam 0                    # webcam deste computador (teste sem Pi)
     python detector_pc.py --arquivo foto.jpg         # imagem ou video (teste)
 
@@ -36,6 +39,7 @@ fonte = p.add_argument_group("fonte do video (escolha uma)")
 fonte.add_argument("--pi", default="192.168.1.70", help="IP do Raspberry Pi (padrao 192.168.1.70)")
 fonte.add_argument("--porta", type=int, default=8080)
 fonte.add_argument("--url", default=None, help="URL completa do MJPEG (ex.: http://127.0.0.1:18080/stream)")
+fonte.add_argument("--udp", default=None, help="H.264 MPEG-TS por UDP (ex.: udp://127.0.0.1:5001, copia local do relay da GS)")
 fonte.add_argument("--cam", default=None, help="webcam deste computador (indice), para testar sem o Pi")
 fonte.add_argument("--arquivo", default=None, help="imagem ou video, para testar sem camera")
 p.add_argument("--modelo", default=MODELO_PADRAO)
@@ -52,6 +56,8 @@ p.add_argument("--sem-janela", action="store_true", help="nao abre janela (so te
 p.add_argument("--quadros", type=int, default=0, help="para depois de N quadros processados (0 = infinito)")
 p.add_argument("--salvar-cada", type=int, default=0, help="salva imagem anotada a cada N quadros")
 p.add_argument("--largura-janela", type=int, default=960)
+p.add_argument("--saida-mjpeg", type=int, default=0, help="publica o video ANOTADO em http://127.0.0.1:PORTA/stream (dashboard)")
+p.add_argument("--saida-bind", default="127.0.0.1", help="interface da saida anotada (0.0.0.0 para outros computadores)")
 args = p.parse_args()
 
 CAPTURAS = os.path.join(AQUI, "capturas")
@@ -116,8 +122,9 @@ src = vl.abrir_fonte(args)
 nome_fonte = getattr(src, "url", None) or str(args.arquivo or f"webcam {args.cam}")
 log(f"[fonte] {nome_fonte}")
 pitags = None
-if isinstance(src, vl.StreamReader) and not args.tags_local:
-    pitags = vl.PiTags(src.base)
+if isinstance(src, (vl.StreamReader, vl.UdpReader)) and not args.tags_local:
+    base = src.base if isinstance(src, vl.StreamReader) else f"http://{args.pi}:{args.porta}"
+    pitags = vl.PiTags(base)
     pitags.start()
     log("[tag] AprilTag calculada no Pi (lida de /tags); lado/familias/escala definidos no Pi")
 else:
@@ -174,6 +181,77 @@ def tela_espera(status):
     texto(img, "Confira no Pi: tmux attach -t cam   (q sai)", (20, 440), (160, 160, 160), 0.5, None)
     return img
 
+
+# --------------------------------------------------------------------------- saida anotada (dashboard)
+saida = None
+if args.saida_mjpeg:
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class _Saida:
+        def __init__(self):
+            self.cond = threading.Condition()
+            self.jpg, self.seq, self.clientes = None, 0, 0
+
+        def put(self, img):
+            if self.clientes <= 0 and self.jpg is not None and self.seq % 10:
+                self.seq += 1                                   # ninguem assistindo: atualiza so 1 em 10
+                return
+            ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            if ok:
+                with self.cond:
+                    self.jpg = buf.tobytes()
+                    self.seq += 1
+                    self.cond.notify_all()
+
+    saida = _Saida()
+
+    class _H(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.0"
+
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            path = self.path.split("?")[0]
+            if path == "/frame.jpg":
+                jpg = saida.jpg
+                if jpg is None:
+                    self.send_response(503); self.end_headers(); return
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(jpg)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(jpg)
+                return
+            if path not in ("/stream", "/"):
+                self.send_response(404); self.end_headers(); return
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            saida.clientes += 1
+            last = -1
+            try:
+                while True:
+                    with saida.cond:
+                        if saida.seq == last:
+                            saida.cond.wait(2.0)
+                        jpg, last = saida.jpg, saida.seq
+                    if jpg is None:
+                        continue
+                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(jpg) + jpg + b"\r\n")
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                saida.clientes -= 1
+
+    _srv = ThreadingHTTPServer((args.saida_bind, args.saida_mjpeg), _H)
+    _srv.daemon_threads = True
+    threading.Thread(target=_srv.serve_forever, daemon=True).start()
+    log(f"[saida] video anotado em http://{args.saida_bind}:{args.saida_mjpeg}/stream")
 
 # --------------------------------------------------------------------------- loop
 JANELA = "Visao Robotica (q sai)"
@@ -268,6 +346,8 @@ try:
         anot = img.copy()
         desenhar(anot, dets, tags, hud, msg)
         ultimo = (anot, tags)
+        if saida is not None:
+            saida.put(anot)
         n += 1
 
         if args.salvar_cada and n % args.salvar_cada == 0:

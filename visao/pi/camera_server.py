@@ -19,6 +19,13 @@ Endpoints:
     /calibrar?ref=50   ajusta a escala da distancia com UMA tag a 50 cm
     /zerar      zera o ajuste
 
+H.264 para a ground station (contrato da competicao, secao 4.1):
+    python camera_server.py --h264 udp://IP_DO_MAC:5000
+    -> ffmpeg h264_v4l2m2m (hardware do Pi), Constrained Baseline, sem B-frames, GOP = fps (1 keyframe/s)
+       com SPS/PPS repetidos, 640x480, taxa FIXA de --h264-fps (repete o ultimo quadro se a camera atrasar),
+       --h264-kbps (padrao 1000), MPEG-TS por UDP.
+    Com --h264 o JPEG do MJPEG so e gerado quando ha cliente no /stream (economiza CPU e Wi-Fi).
+
 Depende so de OpenCV, NumPy e da biblioteca padrao (Python 3.8+).
 """
 import argparse
@@ -50,6 +57,10 @@ p.add_argument("--tag-mm", type=float, default=42.0, help="lado da tag em mm (bo
 p.add_argument("--tag-ids", default=None, help="so considerar esses IDs (ex.: 5)")
 p.add_argument("--camera", default=None, help="JSON de calibracao (padrao: camera_pi.json, senao camera_lab.json)")
 p.add_argument("--log-tags", type=float, default=1.0, help="imprime as tags no terminal a cada N s (0 desliga)")
+p.add_argument("--h264", default=None, help="envia H.264 em MPEG-TS por UDP para esse destino (ex.: udp://192.168.1.217:5000)")
+p.add_argument("--h264-fps", type=int, default=10, help="taxa FIXA do H.264; o GOP e igual a ela (1 keyframe por segundo)")
+p.add_argument("--h264-kbps", type=int, default=1000, help="bitrate do H.264 (contrato: no maximo 1500)")
+p.add_argument("--sem-mjpeg", action="store_true", help="nao gera JPEG nem para /frame.jpg (so H.264 + tags)")
 args = p.parse_args()
 
 IS_LINUX = sys.platform.startswith("linux")
@@ -227,6 +238,7 @@ def capture_loop():
         log(f"[fonte] {args.source}")
 
     t_last_send = 0.0
+    t_ultimo_jpg = 0.0
     n, t_fps = 0, time.time()
     warned = False
     while running:
@@ -270,10 +282,16 @@ def capture_loop():
         if ts - t_last_send < min_dt:
             continue
         t_last_send = ts
-        ok, buf = cv2.imencode(".jpg", frame, params)
-        if not ok:
-            continue
-        latest.put(buf.tobytes(), ts, frame.shape[1], frame.shape[0], frame)
+        jpg = None
+        precisa_jpg = not args.sem_mjpeg and (not args.h264 or latest.clients > 0 or ts - t_ultimo_jpg > 1.0)
+        if precisa_jpg:
+            ok, buf = cv2.imencode(".jpg", frame, params)
+            if ok:
+                jpg = buf.tobytes()
+                t_ultimo_jpg = ts
+        if jpg is None:
+            jpg = latest.jpg                       # mantem o ultimo JPEG para /frame.jpg
+        latest.put(jpg, ts, frame.shape[1], frame.shape[0], frame)
 
         n += 1
         if ts - t_fps >= 2.0:
@@ -281,6 +299,91 @@ def capture_loop():
             n, t_fps = 0, ts
     if cap is not None:
         cap.release()
+
+
+# --------------------------------------------------------------------------- H.264 (ffmpeg, encoder de hardware)
+class H264Sender(threading.Thread):
+    """Alimenta um ffmpeg (h264_v4l2m2m) com YUV420 a taxa FIXA e manda MPEG-TS por UDP.
+    Taxa fixa = timestamps regulares e GOP de exatamente 1 s, mesmo com a webcam oscilando (~11 fps)."""
+
+    def __init__(self, url, fps, kbps):
+        super().__init__(daemon=True)
+        self.url = url if "pkt_size" in url else url + ("&" if "?" in url else "?") + "pkt_size=1316"
+        self.fps, self.kbps = int(fps), int(kbps)
+        self.proc = None
+        self.enviados = 0
+        self.repetidos = 0
+        self.status = "iniciando"
+
+    def _cmd(self, w, h):
+        return ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostats",
+                "-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", f"{w}x{h}", "-framerate", str(self.fps), "-i", "pipe:0",
+                "-c:v", "h264_v4l2m2m", "-b:v", f"{self.kbps}k", "-g", str(self.fps), "-bf", "0",
+                "-profile:v", "578",                      # Constrained Baseline (o encoder nao aceita o nome)
+                "-num_capture_buffers", "16", "-bsf:v", "dump_extra",   # SPS/PPS em todo keyframe
+                "-flush_packets", "1", "-muxdelay", "0", "-muxpreload", "0",
+                "-f", "mpegts", self.url]
+
+    def _stderr(self, proc):
+        for line in iter(proc.stderr.readline, b""):
+            log("[h264] ffmpeg: " + line.decode(errors="replace").rstrip())
+
+    def run(self):
+        import subprocess
+        dt = 1.0 / self.fps
+        while running:
+            frame, _, _ = latest.wait_frame(-1, 2.0)
+            if frame is None:
+                time.sleep(0.2)                              # camera ainda nao deu o primeiro quadro
+                continue
+            h, w = frame.shape[:2]
+            try:
+                self.proc = subprocess.Popen(self._cmd(w, h), stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+            except FileNotFoundError:
+                log("[h264] ffmpeg nao encontrado (sudo apt install ffmpeg); H.264 desligado")
+                return
+            threading.Thread(target=self._stderr, args=(self.proc,), daemon=True).start()
+            log(f"[h264] enviando para {self.url}: {w}x{h} {self.fps} fps fixos, GOP {self.fps}, {self.kbps} kbps")
+            self.status = "enviando"
+            last_seq = -1
+            t_next = time.monotonic()
+            try:
+                while running:
+                    frame, seq, _ = latest.wait_frame(-2, 0)        # pega o mais recente sem esperar
+                    if frame is None:
+                        time.sleep(dt)
+                        continue
+                    if seq == last_seq:
+                        self.repetidos += 1                         # camera mais lenta que a taxa fixa
+                    last_seq = seq
+                    if frame.shape[:2] != (h, w):
+                        frame = cv2.resize(frame, (w, h))
+                    self.proc.stdin.write(cv2.cvtColor(frame, cv2.COLOR_BGR2YUV_I420).tobytes())
+                    self.enviados += 1
+                    t_next += dt
+                    espera = t_next - time.monotonic()
+                    if espera > 0:
+                        time.sleep(espera)
+                    elif espera < -1.0:                              # atrasou muito: realinha o relogio
+                        t_next = time.monotonic()
+                    if self.proc.poll() is not None:
+                        raise BrokenPipeError("ffmpeg terminou")
+            except (BrokenPipeError, OSError, ValueError) as e:
+                self.status = f"ffmpeg caiu ({e}); reiniciando"
+                log(f"[h264] {self.status}")
+            finally:
+                try:
+                    self.proc.stdin.close()
+                except Exception:
+                    pass
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+            time.sleep(1.0)
+
+
+h264 = None
 
 
 # --------------------------------------------------------------------------- HTTP
@@ -313,6 +416,8 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": latest.cam_ok, "camera": latest.cam_name, "width": latest.w, "height": latest.h,
                 "fps": round(latest.fps, 1), "seq": latest.seq, "clients": latest.clients,
                 "time": time.time(), "host": socket.gethostname(),
+                "h264": ({"url": h264.url, "status": h264.status, "enviados": h264.enviados, "repetidos": h264.repetidos,
+                          "fps": h264.fps, "kbps": h264.kbps} if h264 else None),
             }).encode()
             return self._send(200, "application/json", body)
         if path == "/tags":
@@ -393,6 +498,10 @@ def main():
     global running
     t = threading.Thread(target=capture_loop, daemon=True)
     t.start()
+    global h264
+    if args.h264:
+        h264 = H264Sender(args.h264, args.h264_fps, args.h264_kbps)
+        h264.start()
     if runner is not None:
         threading.Thread(target=tag_loop, daemon=True).start()
         log(f"[tag] AprilTag no Pi: {args.tag_familias}, lado {args.tag_mm:.0f} mm, camera "
