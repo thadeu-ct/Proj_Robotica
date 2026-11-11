@@ -61,6 +61,8 @@ p.add_argument("--sem-janela", action="store_true", help="nao abre janela (so te
 p.add_argument("--quadros", type=int, default=0, help="para depois de N quadros processados (0 = infinito)")
 p.add_argument("--salvar-cada", type=int, default=0, help="salva imagem anotada a cada N quadros")
 p.add_argument("--largura-janela", type=int, default=960)
+p.add_argument("--relogio", action="store_true",
+               help="escreve a hora do computador (ms) no canto do video: filme um cronometro para medir o atraso")
 p.add_argument("--saida-mjpeg", type=int, default=0, help="publica o video ANOTADO em http://127.0.0.1:PORTA/stream (dashboard)")
 p.add_argument("--saida-bind", default="127.0.0.1", help="interface da saida anotada (0.0.0.0 para outros computadores)")
 p.add_argument("--dashboard", default=None,
@@ -200,6 +202,12 @@ def desenhar(img, dets, tags, hud, msg):
         y += 22
     if msg:
         texto(img, msg, (6, img.shape[0] - 12), (0, 0, 0), 0.6, (0, 255, 255), 2)
+    if args.relogio:
+        # hora deste computador no instante em que o quadro foi processado. Filmando um cronometro na tela,
+        # a diferenca entre o cronometro no video e este relogio e o atraso camera -> processamento.
+        agora = time.time()
+        rel = time.strftime("%H:%M:%S", time.localtime(agora)) + f".{int(agora % 1 * 1000):03d}"
+        texto(img, rel, (img.shape[1] - 200, img.shape[0] - 14), (255, 255, 255), 0.8, (120, 0, 0), 2)
 
 
 def tela_espera(status):
