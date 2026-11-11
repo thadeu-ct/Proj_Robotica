@@ -19,6 +19,8 @@
 #define ENC_B_CH1   36
 #define ENC_B_CH2   39
 
+#define sleep   14
+
 // 'volatile' garante leitura segura entre a ISR e o loop principal
 volatile long cont = 0;
 
@@ -35,6 +37,8 @@ void setup() {
   pinMode(MOTOR_A_IN2, OUTPUT);
   pinMode(MOTOR_B_IN1, OUTPUT);
   pinMode(MOTOR_B_IN2, OUTPUT);
+
+  pinMode(sleep, OUTPUT);
 
   // Configuração dos pinos de leitura dos encoders
   // Nota: GPIOs 34 a 39 não possuem pull-up interno; requerem sinal ativo ou pull-up externo
@@ -62,7 +66,7 @@ void loop() {
     analogWrite(MOTOR_A_IN1, velocidade);
     // digitalWrite(MOTOR_B_IN1, HIGH);
     // analogWrite(MOTOR_B_IN2, velocidade);
-    
+    digitalWrite(sleep, HIGH);
     Serial.println(cont);
     delay(10);
   }
@@ -73,7 +77,7 @@ void loop() {
     digitalWrite(MOTOR_A_IN2, HIGH);
     // analogWrite(MOTOR_B_IN1, velocidade);
     // digitalWrite(MOTOR_B_IN2, HIGH);
-    
+    digitalWrite(sleep, HIGH);
     Serial.println(cont);
     delay(10);
   }
