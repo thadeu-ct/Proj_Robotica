@@ -4,7 +4,8 @@ Seguir a AprilTag: roda NO Pi, le a tag calculada pelo camera_server.py (/tags) 
 (v, w) para o ESP32 pelo protocolo de protocolo_esp32.py. O ESP32 faz o PI de cada roda.
 
     python3 seguir_tag.py                 # SIMULADO: so mostra o que mandaria (padrao, seguro)
-    python3 seguir_tag.py --motores       # manda de verdade pela serial (config_seguir.json: serial/baud)
+    python3 seguir_tag.py --motores       # manda direto pela serial (config_seguir.json: serial/baud)
+    python3 seguir_tag.py --agente        # manda ao agente MQTT (dono da serial), UDP 127.0.0.1:8095
     python3 seguir_tag.py --tag 3 --parar-a 25     # sobrescreve a config so nesta execucao
 
 Parametros (tag alvo, distancia de parada, ganhos, limites): config_seguir.json, na mesma pasta.
@@ -32,6 +33,14 @@ import urllib.request
 AQUI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, AQUI)
 import protocolo_esp32 as proto  # noqa: E402
+
+
+def mostrar(msg):
+    """print que nunca derruba o controle (ex.: terminal ssh fechado com o robo andando)."""
+    try:
+        print(msg, flush=True)
+    except (BrokenPipeError, OSError):
+        pass
 
 
 def carregar_config(path):
@@ -66,37 +75,80 @@ class LeitorTags(threading.Thread):
 
 
 # --------------------------------------------------------------------------- saida para os motores
+# Toda saida tem a mesma interface: iniciar(), comando(v, w, estado, tag), fechar().
+# Assim o controle nao sabe (nem precisa saber) se esta falando com a serial, com o agente MQTT ou com ninguem.
 class SaidaSimulada:
     nome = "SIMULADO (nada vai para os motores)"
 
-    def enviar(self, quadro):
+    def iniciar(self):
         pass
 
-    def ler(self):
-        return []
+    def comando(self, v, w, estado, tag):
+        pass
 
     def fechar(self):
         pass
 
 
 class SaidaSerial:
+    """Dono da serial: manda CMD_VEL direto ao ESP32. Use so quando NAO houver o agente MQTT rodando."""
+
     def __init__(self, porta, baud):
         import serial  # pyserial; no Pi: python3 do sistema ja tem
         self.s = serial.Serial(porta, baud, timeout=0)
         self.dec = proto.Decodificador()
         self.nome = f"serial {porta} @ {baud}"
-        self.recebidos = 0
+        self.seq = 0
+        self.telemetria = None        # ultimo dict de proto.decodificar_telemetria
 
-    def enviar(self, quadro):
+    def _env(self, quadro):
         self.s.write(quadro)
+        self.seq = (self.seq + 1) & 0xFF
 
-    def ler(self):
-        q = self.dec.alimentar(self.s.read(4096))
-        self.recebidos += len(q)
-        return q
+    def iniciar(self):
+        self._env(proto.montar_modo(proto.MODO_AUTONOMO, self.seq))
+
+    def comando(self, v, w, estado, tag):
+        self._env(proto.montar_cmd_vel(v, w, self.seq))
+        for tipo, _, carga in self.dec.alimentar(self.s.read(4096)):
+            if tipo == proto.TELEMETRIA:
+                self.telemetria = proto.decodificar_telemetria(carga)
 
     def fechar(self):
+        for _ in range(3):
+            self._env(proto.montar_cmd_vel(0.0, 0.0, self.seq))
+        self._env(proto.montar_modo(proto.MODO_ESPERA, self.seq))
         self.s.close()
+
+
+class SaidaAgente:
+    """Manda (v, w, estado) por UDP para o agente MQTT (mqtt/robo_agente.py), que e o dono da serial e
+    decide o modo (MANUAL/AUTONOMO) e o homem-morto do contrato. Um datagrama JSON por passo (20 Hz):
+        {"v": m/s, "w": rad/s, "estado": "APROXIMANDO", "seq": n, "ts": epoch_s,
+         "tag": {"id": 0, "dist_cm": 52.3, "angulo_deg": 4.1} ou null}
+    O agente para o robo se ficar mais de 0,5 s sem datagrama."""
+
+    def __init__(self, destino):
+        import socket
+        host, porta = destino.rsplit(":", 1)
+        self.end = (host, int(porta))
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.nome = f"agente MQTT udp://{destino}"
+        self.seq = 0
+
+    def iniciar(self):
+        pass
+
+    def comando(self, v, w, estado, tag):
+        msg = {"v": round(v, 4), "w": round(w, 4), "estado": estado, "seq": self.seq, "ts": round(time.time(), 3),
+               "tag": ({"id": tag["id"], "dist_cm": tag["dist_cm"], "angulo_deg": tag["angulo_deg"]} if tag else None)}
+        self.sock.sendto(json.dumps(msg).encode(), self.end)
+        self.seq += 1
+
+    def fechar(self):
+        for _ in range(3):
+            self.comando(0.0, 0.0, "PARADO", None)
+        self.sock.close()
 
 
 # --------------------------------------------------------------------------- controle
@@ -175,7 +227,9 @@ class Seguidor:
 def main():
     p = argparse.ArgumentParser(description="Robo vai ate a AprilTag e para (ver config_seguir.json)")
     p.add_argument("--config", default=os.path.join(AQUI, "config_seguir.json"))
-    p.add_argument("--motores", action="store_true", help="manda de verdade pela serial (sem isso: simulado)")
+    p.add_argument("--motores", action="store_true", help="manda direto pela serial ao ESP32 (sem agente MQTT)")
+    p.add_argument("--agente", nargs="?", const="127.0.0.1:8095", default=None,
+                   help="manda (v, w, estado) por UDP ao agente MQTT, que e o dono da serial (padrao 127.0.0.1:8095)")
     p.add_argument("--tag", type=int, default=None, help="sobrescreve tag_alvo (-1 = qualquer uma)")
     p.add_argument("--parar-a", type=float, default=None, help="sobrescreve parar_a_cm")
     p.add_argument("--segundos", type=float, default=0, help="encerra depois de N s (0 = ate Ctrl+C)")
@@ -187,45 +241,47 @@ def main():
     if args.parar_a is not None:
         cfg["parar_a_cm"] = args.parar_a
 
-    saida = SaidaSerial(cfg["serial"], cfg["baud"]) if args.motores else SaidaSimulada()
+    if args.motores and args.agente:
+        sys.exit("use --motores (serial direta) OU --agente (via agente MQTT), nao os dois")
+    if args.motores:
+        saida = SaidaSerial(cfg["serial"], cfg["baud"])
+    elif args.agente:
+        saida = SaidaAgente(args.agente)
+    else:
+        saida = SaidaSimulada()
     leitor = LeitorTags(cfg["url_tags"])
     leitor.start()
     seg = Seguidor(cfg)
     alvo = "qualquer tag" if cfg["tag_alvo"] is None else f"tag ID {cfg['tag_alvo']}"
-    print(f"[seguir] {alvo}, parar a {cfg['parar_a_cm']:.0f} cm | saida: {saida.nome} | Ctrl+C para", flush=True)
+    mostrar(f"[seguir] {alvo}, parar a {cfg['parar_a_cm']:.0f} cm | saida: {saida.nome} | Ctrl+C para")
 
     parar = threading.Event()
     signal.signal(signal.SIGINT, lambda *a: parar.set())
     signal.signal(signal.SIGTERM, lambda *a: parar.set())
 
-    seq = 0
     dt = 1.0 / cfg["taxa_comando_hz"]
     t0 = t_ant = time.monotonic()
     t_print = 0.0
-    saida.enviar(proto.montar_modo(proto.MODO_AUTONOMO, seq)); seq += 1
+    saida.iniciar()
     try:
         while not parar.is_set():
             agora_m = time.monotonic()
             v, w, tag = seg.passo(leitor.snap, time.time(), agora_m - t_ant)
             t_ant = agora_m
-            saida.enviar(proto.montar_cmd_vel(v, w, seq)); seq = (seq + 1) & 0xFF
-            saida.ler()
+            saida.comando(v, w, seg.estado, tag)
             if agora_m - t_print >= 0.2:
                 t_print = agora_m
                 info = (f"ID {tag['id']} {tag['dist_cm']:5.1f} cm {tag['angulo_deg']:+5.1f} graus" if tag
                         else (leitor.erro or "sem tag"))
-                print(f"{time.strftime('%H:%M:%S')} {seg.estado:11s} v {v:+.3f} m/s  w {w:+.2f} rad/s  | {info}", flush=True)
+                mostrar(f"{time.strftime('%H:%M:%S')} {seg.estado:11s} v {v:+.3f} m/s  w {w:+.2f} rad/s  | {info}")
             if args.segundos and agora_m - t0 >= args.segundos:
                 break
             parar.wait(max(0.0, dt - (time.monotonic() - agora_m)))
     finally:
-        # para os motores e volta para ESPERA (o ESP32 tambem para sozinho em 250 ms sem quadro)
-        for _ in range(3):
-            saida.enviar(proto.montar_cmd_vel(0.0, 0.0, seq)); seq = (seq + 1) & 0xFF
-        saida.enviar(proto.montar_modo(proto.MODO_ESPERA, seq))
+        # para os motores (o ESP32 tambem para sozinho em 250 ms sem quadro; o agente, em 0,5 s)
         saida.fechar()
         leitor.rodando = False
-        print("[seguir] parado (v=0, w=0, modo ESPERA)", flush=True)
+        mostrar("[seguir] parado (mandou v=0, w=0)")
 
 
 if __name__ == "__main__":

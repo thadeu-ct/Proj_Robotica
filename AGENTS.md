@@ -24,7 +24,7 @@ webcam ─► Pi: camera_server.py ─┬─► AprilTag (apriltag_pi.py) ─►
                                 └─► MJPEG :8080/stream (só para o modo de laboratório, visao/pc/iniciar.sh)
 ```
 
-A AprilTag roda **no Pi**, e não no Mac, porque o robô precisa pilotar sozinho mesmo se o Wi-Fi cair. O YOLO roda no Mac porque o Pi 3 só faz cerca de 4,5 fps com ele.
+A AprilTag roda **no Pi**, e não no Mac, para o controle autônomo não depender da rede nem do Mac (latência baixa e sem perda de quadros). O YOLO roda no Mac porque o Pi 3 só faz cerca de 4,5 fps com ele. Atenção: o contrato (§3) exige homem-morto, então o robô **para** se perder o broker MQTT, inclusive em modo autônomo. Quem garante isso é o agente MQTT, dono da serial do ESP32 (`controle/README.md`).
 
 ## Portas
 

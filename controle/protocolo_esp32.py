@@ -14,7 +14,13 @@ Tipos (Pi -> ESP32):
     0x03 MODE       carga: modo uint8 (0 = ESPERA, 1 = AUTONOMO, 2 = MANUAL)
     0x04 HEARTBEAT  carga: vazia
 Tipos (ESP32 -> Pi):
-    0x81 TELEMETRIA carga: definida junto com o firmware (contagens dos encoders, velocidades, bateria, modo, falhas)
+    0x81 TELEMETRIA a 100 Hz (ou menos), 20 bytes, struct "<iihhHBBhH":
+         enc_esq int32 [contagens acumuladas], enc_dir int32,
+         v_esq int16 [mm/s medida], v_dir int16,
+         bateria uint16 [mV, do INA219], modo uint8 (o modo EFETIVO do ESP32), falhas uint8 (bits, abaixo),
+         rumo int16 [centesimos de grau, -18000..18000], tof uint16 [mm; 0 = sem leitura]
+       bits de falhas: 0 watchdog (ficou sem quadro do Pi), 1 bateria baixa, 2 nFAULT do DRV8833,
+                       3 erro I2C (IMU/ToF/INA), 4..7 reservados
 
 Seguranca (lado ESP32): sem quadro valido por 250 ms -> zera os motores e vai para ESPERA.
 O Pi manda CMD_VEL a 20-50 Hz, mesmo que seja zero.
@@ -64,6 +70,27 @@ def montar_heartbeat(seq: int) -> bytes:
     return montar_quadro(HEARTBEAT, seq)
 
 
+FORMATO_TELEMETRIA = "<iihhHBBhH"          # 20 bytes; ver docstring do modulo
+FALHAS = {0: "watchdog", 1: "bateria_baixa", 2: "driver_falha", 3: "erro_i2c"}
+
+
+def montar_telemetria(seq, enc_esq, enc_dir, v_esq_mm_s, v_dir_mm_s, bateria_mv, modo, falhas, rumo_cdeg, tof_mm):
+    """Usado pelo firmware (como referencia) e por simuladores do lado do Pi."""
+    return montar_quadro(TELEMETRIA, seq, struct.pack(FORMATO_TELEMETRIA, enc_esq, enc_dir, _sat16(v_esq_mm_s),
+                                                      _sat16(v_dir_mm_s), bateria_mv, modo, falhas,
+                                                      _sat16(rumo_cdeg), tof_mm))
+
+
+def decodificar_telemetria(carga: bytes) -> dict:
+    """Carga de um quadro TELEMETRIA -> dict com unidades no nome."""
+    if len(carga) != struct.calcsize(FORMATO_TELEMETRIA):
+        raise ValueError(f"telemetria com {len(carga)} bytes (esperado {struct.calcsize(FORMATO_TELEMETRIA)})")
+    ee, ed, ve, vd, bat, modo, falhas, rumo, tof = struct.unpack(FORMATO_TELEMETRIA, carga)
+    return {"enc_esq": ee, "enc_dir": ed, "v_esq_m_s": ve / 1000, "v_dir_m_s": vd / 1000,
+            "bateria_v": bat / 1000, "modo": modo, "falhas": [n for b, n in FALHAS.items() if falhas >> b & 1],
+            "rumo_graus": rumo / 100, "tof_cm": (tof / 10) if tof else None}
+
+
 class Decodificador:
     """Recebe bytes soltos da serial e devolve quadros validos (tipo, seq, carga). Descarta lixo e CRC errado."""
 
@@ -110,4 +137,8 @@ if __name__ == "__main__":
     assert out[0] == (CMD_VEL, 7, struct.pack("<hh", 123, -500)), out
     assert out[1] == (HEARTBEAT, 8, b""), out
     assert d.crc_erros == 1, d.crc_erros
-    print("autoteste ok: CRC, montagem, quadro partido ao meio, lixo antes e quadro com CRC errado descartado")
+    tel = Decodificador().alimentar(montar_telemetria(9, 1234, -56, 101, 99, 11850, MODO_AUTONOMO, 0b0011, -4520, 215))
+    t = decodificar_telemetria(tel[0][2])
+    assert t["bateria_v"] == 11.85 and t["falhas"] == ["watchdog", "bateria_baixa"] and t["rumo_graus"] == -45.2, t
+    assert t["tof_cm"] == 21.5 and t["enc_dir"] == -56, t
+    print("autoteste ok: CRC, montagem, quadro partido ao meio, lixo antes, CRC errado descartado e telemetria")
