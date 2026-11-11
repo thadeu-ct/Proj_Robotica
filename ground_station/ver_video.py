@@ -45,7 +45,7 @@ def ler():
             log("aguardando video em %s ..." % args.url)
             continue
         s = c.streams.video[0]
-        s.thread_type = "AUTO"
+        s.codec_context.thread_count = 1   # threads de quadro seguram 1 quadro cada: atraso alto
         t0, n = time.time(), 0
         try:
             for quadro in c.decode(s):

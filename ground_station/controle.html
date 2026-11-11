@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Controle do Rover</title>
+<style>
+  :root { --bg:#0b0e12; --painel:#141a21; --borda:#263040; --texto:#e8edf2; --fraco:#7d8a99;
+          --verde:#3ddc84; --amarelo:#ffc53d; --vermelho:#ff5a5a; --azul:#4da3ff; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--texto); font: 15px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 16px; }
+  h2 { font-size: 12px; letter-spacing: .15em; color: var(--fraco); margin-bottom: 10px; }
+  .grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; max-width: 1200px; margin: 0 auto; }
+  .painel { background: var(--painel); border: 1px solid var(--borda); border-radius: 10px; padding: 14px; }
+  .linha { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { background: #1d2530; color: var(--texto); border: 1px solid var(--borda); border-radius: 8px; padding: 10px 14px;
+           font: inherit; font-weight: 600; cursor: pointer; }
+  button:hover { border-color: var(--fraco); }
+  button.ativo { border-color: var(--verde); color: var(--verde); }
+  button.perigo { background: var(--vermelho); border-color: var(--vermelho); color: #fff; font-size: 22px; width: 100%; padding: 18px; }
+  .teclas { display: grid; grid-template-columns: repeat(3, 56px); gap: 6px; justify-content: center; margin: 8px 0; }
+  .tecla { height: 56px; border: 1px solid var(--borda); border-radius: 8px; display: flex; align-items: center; justify-content: center;
+           font-weight: 800; font-size: 18px; color: var(--fraco); }
+  .tecla.on { background: var(--azul); color: #fff; border-color: var(--azul); }
+  .num { font-variant-numeric: tabular-nums; }
+  .grande { font-size: 28px; font-weight: 800; }
+  .aviso { color: var(--amarelo); font-weight: 700; min-height: 20px; margin-top: 8px; }
+  .ruim { color: var(--vermelho); }
+  .bom { color: var(--verde); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 4px 6px; border-bottom: 1px solid var(--borda); }
+  input[type=range] { width: 100%; }
+  small { color: var(--fraco); }
+</style>
+</head>
+<body>
+<div class="grade">
+  <section class="painel">
+    <h2>ROBÔ</h2>
+    <div class="linha" style="justify-content:space-between">
+      <div><small>status</small><div class="grande" id="status">—</div></div>
+      <div><small>modo</small><div class="grande" id="modo">—</div></div>
+      <div><small>bateria</small><div class="grande num" id="bat">—</div></div>
+    </div>
+    <div style="margin-top:8px"><small>estado</small><div class="grande" id="estado">—</div></div>
+    <div class="aviso" id="alerta"></div>
+    <small id="broker"></small>
+  </section>
+
+  <section class="painel">
+    <h2>DIREÇÃO (MANUAL) — W A S D ou setas</h2>
+    <div class="teclas">
+      <span></span><div class="tecla" id="k-w">W</div><span></span>
+      <div class="tecla" id="k-a">A</div><div class="tecla" id="k-s">S</div><div class="tecla" id="k-d">D</div>
+    </div>
+    <small>velocidade máxima: <b id="escala-txt">50%</b></small>
+    <input type="range" id="escala" min="10" max="100" step="10" value="50">
+    <div style="margin-top:10px"><button class="perigo" id="parar">PARAR (espaço)</button></div>
+  </section>
+
+  <section class="painel">
+    <h2>MODO E FASE</h2>
+    <div class="linha">
+      <button data-mode="MANUAL">MANUAL (M)</button>
+      <button data-mode="AUTONOMO">AUTÔNOMO (N)</button>
+    </div>
+    <div class="linha" style="margin-top:10px" id="estados"></div>
+    <small style="display:block;margin-top:8px">A fase precisa ser fiel (contrato §3.1): MANUAL em NAVEGACAO ou BUSCA_ARTEFATO dá alerta e penalidade.</small>
+  </section>
+
+  <section class="painel">
+    <h2>GARRA E BRAÇO</h2>
+    <div class="linha">
+      <button data-garra="open">Abrir garra (O)</button>
+      <button data-garra="close">Fechar garra (F)</button>
+    </div>
+    <div class="linha" style="margin-top:10px" id="presets"></div>
+  </section>
+
+  <section class="painel">
+    <h2>DETECÇÃO (YOLO → juiz)</h2>
+    <label class="linha"><input type="checkbox" id="det-auto"> automática: 1 por parada em ARTEFATO_ENCONTRADO</label>
+    <div style="margin:8px 0"><small>vendo agora:</small> <b id="vendo">—</b></div>
+    <div class="linha" id="det-botoes"></div>
+    <small style="display:block;margin:8px 0 4px">publicadas (não repita para "tentar" classes: vale a primeira válida)</small>
+    <table id="publicadas"></table>
+  </section>
+
+  <section class="painel">
+    <h2>ARENA</h2>
+    <div id="arena"><small>sem arena/state</small></div>
+  </section>
+</div>
+
+<script>
+const ESTADOS = ["IDLE", "BUSCA", "NAVEGACAO", "BUSCA_ARTEFATO", "ARTEFATO_ENCONTRADO", "COLETA"];
+const ARTEFATOS = ["hiperboloide", "argola_pequena", "argola_grande", "cilindro", "exotico"];
+const $ = id => document.getElementById(id);
+const cmd = (tipo, dados = {}) => fetch("/api/cmd/" + tipo, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(dados) })
+  .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.erro); })).catch(e => console.warn(tipo, e));
+
+$("estados").innerHTML = ESTADOS.map(s => `<button data-state="${s}">${s}</button>`).join("");
+$("det-botoes").innerHTML = ARTEFATOS.map(a => `<button data-art="${a}">${a}</button>`).join("");
+document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => cmd("mode", { mode: b.dataset.mode }));
+document.querySelectorAll("[data-state]").forEach(b => b.onclick = () => cmd("state", { state: b.dataset.state }));
+document.querySelectorAll("[data-garra]").forEach(b => b.onclick = () => cmd("gripper", { action: b.dataset.garra }));
+document.querySelectorAll("[data-art]").forEach(b => b.onclick = () => {
+  if (confirmarDet === b.dataset.art) { cmd("detection", { artifact: b.dataset.art }); confirmarDet = null; b.textContent = b.dataset.art; return; }
+  confirmarDet = b.dataset.art; b.textContent = "confirmar " + b.dataset.art + "?";
+  setTimeout(() => { if (confirmarDet === b.dataset.art) { confirmarDet = null; b.textContent = b.dataset.art; } }, 3000);
+});
+let confirmarDet = null;
+$("parar").onclick = () => { teclas.clear(); cmd("stop"); };
+$("det-auto").onchange = e => cmd("det_auto", { ligada: e.target.checked });
+$("escala").oninput = e => $("escala-txt").textContent = e.target.value + "%";
+
+// ---- teclado: manda o joystick a 10 Hz enquanto ha tecla; o gs_mqtt publica cmd/vel e zeros ao soltar
+const teclas = new Set();
+const MAPA = { w: "w", arrowup: "w", s: "s", arrowdown: "s", a: "a", arrowleft: "a", d: "d", arrowright: "d" };
+addEventListener("keydown", e => {
+  const k = e.key.toLowerCase();
+  if (e.target.tagName === "INPUT" && e.target.type !== "range") return;
+  if (k === " ") { e.preventDefault(); teclas.clear(); cmd("stop"); return; }
+  if (k === "m") return cmd("mode", { mode: "MANUAL" });
+  if (k === "n") return cmd("mode", { mode: "AUTONOMO" });
+  if (k === "o") return cmd("gripper", { action: "open" });
+  if (k === "f") return cmd("gripper", { action: "close" });
+  if (MAPA[k]) { e.preventDefault(); teclas.add(MAPA[k]); }
+});
+addEventListener("keyup", e => { const k = MAPA[e.key.toLowerCase()]; if (k) teclas.delete(k); });
+addEventListener("blur", () => teclas.clear());   // trocou de janela: solta tudo
+
+function joystick() {
+  const esc = $("escala").value / 100;
+  const lin = ((teclas.has("w") ? 1 : 0) - (teclas.has("s") ? 1 : 0)) * esc;
+  const ang = ((teclas.has("a") ? 1 : 0) - (teclas.has("d") ? 1 : 0)) * esc;   // + = girar a esquerda
+  for (const k of "wasd") $("k-" + k).classList.toggle("on", teclas.has(k));
+  return { linear: lin, angular: ang };
+}
+setInterval(() => cmd("joy", joystick()), 100);
+
+// ---- estado
+function atualizar(r) {
+  const robo = r.robo, st = robo.status, modo = robo.mode && robo.mode.mode, est = robo.state && robo.state.state;
+  $("status").textContent = st || "—"; $("status").className = "grande " + (st === "online" ? "bom" : "ruim");
+  $("modo").textContent = modo || "—";
+  $("estado").textContent = est || "—";
+  const b = robo.battery;
+  $("bat").textContent = b ? (b.pct != null ? Math.round(b.pct) + "%" : "") + (b.v != null ? " " + b.v.toFixed(2) + " V" : "") : "—";
+  $("alerta").textContent = modo === "MANUAL" && (est === "NAVEGACAO" || est === "BUSCA_ARTEFATO")
+    ? "⚠ MANUAL em " + est + ": o juiz recebe alerta de autonomia (penalidade)" : "";
+  $("broker").textContent = r.conectado ? "GS conectada ao broker como " + r.id : "GS SEM BROKER";
+  $("broker").className = r.conectado ? "" : "ruim";
+  document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("ativo", b.dataset.mode === modo));
+  document.querySelectorAll("[data-state]").forEach(b => b.classList.toggle("ativo", b.dataset.state === est));
+  $("det-auto").checked = r.det_auto;
+  $("vendo").textContent = r.vendo.length ? r.vendo.map(o => `${o.artifact} ${Math.round(o.conf * 100)}%`).join(", ") : "—";
+  $("publicadas").innerHTML = r.publicadas.map(p => `<tr><td>${p.hora}</td><td>${p.artifact}</td><td>${Math.round(p.conf * 100)}%</td><td><small>${p.origem}</small></td></tr>`).join("");
+  if ($("presets").dataset.feito !== "1") {
+    $("presets").innerHTML = r.presets.length ? r.presets.map(n => `<button data-preset="${n}">${n}</button>`).join("") : "<small>sem posições do braço em config_gs.json</small>";
+    document.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => cmd("arm", { preset: b.dataset.preset }));
+    $("presets").dataset.feito = "1";
+  }
+  const a = r.arena;
+  $("arena").innerHTML = a ? `<div class="linha" style="justify-content:space-between"><div><small>rodada</small><div class="grande">${a.round}</div></div>
+    <div><small>ativo</small><div class="grande">${a.active || "—"}</div></div><div><small>situação</small><div class="grande">${a.run}</div></div>
+    <div><small>pontos</small><div class="grande">${a.points}</div></div></div>` : "<small>sem arena/state</small>";
+}
+(function loop() { fetch("/api/resumo").then(r => r.json()).then(atualizar).catch(() => {}).finally(() => setTimeout(loop, 300)); })();
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "_leia": [
+    "Parametros do gs_mqtt.py (no git). Servidor, id e senha ficam no config_local.json (fora do git).",
+    "deteccao: publica 1 detection por parada em ARTEFATO_ENCONTRADO, quando a mesma classe aparece em leituras_estaveis leituras seguidas (5 por segundo) com conf >= conf_min. Com varias pecas na imagem, vale a de maior caixa (a da frente). A mesma classe so e republicada depois de repetir_mesmo_artefato_apos_s (o botao manual nao tem essa trava).",
+    "braco.presets: posicoes prontas do braco (graus por junta). Vazio enquanto o braco nao estiver definido; a pagina so mostra os botoes que existirem aqui."
+  ],
+  "porta_mqtt": 1883,
+  "porta_controle": 8001,
+  "dashboard": "http://127.0.0.1:8000",
+  "detector": "http://127.0.0.1:8091/deteccoes",
+  "deteccao": {
+    "automatica": true,
+    "conf_min": 0.6,
+    "leituras_estaveis": 5,
+    "publicar_em_estados": ["ARTEFATO_ENCONTRADO"],
+    "repetir_mesmo_artefato_apos_s": 30
+  },
+  "braco": {
+    "presets": {}
+  }
+}

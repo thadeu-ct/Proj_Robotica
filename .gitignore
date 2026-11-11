@@ -16,3 +16,4 @@ visao/pi/ajuste_distancia.json
 ground_station/config_local.json
 ground_station/.venv/
 ground_station/logs/
+mqtt/config_local.json

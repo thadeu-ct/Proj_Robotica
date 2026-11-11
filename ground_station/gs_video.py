@@ -190,14 +190,29 @@ class PublicadorWHIP:
         self.url, self.autorizacao = url, autorizacao
         self.track = None
         self.recurso = None
+        self.ultimo_kf = 0.0
 
     def entregar(self, item):
+        if item[2]:
+            self.ultimo_kf = time.monotonic()
         if self.track is not None:
             self.track.entregar(item)
+
+    async def esperar_video(self, parar):
+        """O MediaMTX derruba a sessao WHIP se o video nao chega em ~2 s: so conecta com video chegando."""
+        avisou = False
+        while not parar.is_set() and time.monotonic() - self.ultimo_kf > 2:
+            if not avisou:
+                log("WHIP: esperando o video do robo para conectar")
+                avisou = True
+            await asyncio.sleep(0.2)
 
     async def rodar(self, parar):
         espera = 1
         while not parar.is_set():
+            await self.esperar_video(parar)
+            if parar.is_set():
+                break
             pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
             caiu = asyncio.Event()
 
@@ -261,7 +276,9 @@ def abrir_saidas(s_in):
     for url in LOCAIS:
         alvo = url + ("&" if "?" in url else "?") + "pkt_size=1316" if url.startswith("udp://") and "pkt_size" not in url else url
         try:
-            out = av.open(alvo, mode="w", format="mpegts")
+            # PES com tamanho + flush a cada pacote: o leitor fecha o quadro na hora (sem isso: +100 ms a 10 fps)
+            out = av.open(alvo, mode="w", format="mpegts", options={
+                "omit_video_pes_length": "0", "flush_packets": "1", "max_delay": "0"})
             s_out = out.add_stream_from_template(s_in)
             saidas.append((url, out, s_out))
         except av.FFmpegError as e:

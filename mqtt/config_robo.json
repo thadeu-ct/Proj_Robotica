@@ -1,0 +1,23 @@
+{
+  "_leia": [
+    "Parametros do robo_agente.py (no git). Servidor, id e senha ficam no config_local.json (fora do git).",
+    "v_max/w_max: velocidade quando a ground station manda cmd/vel = 1 (modo MANUAL).",
+    "homem_morto_s: sem cmd/vel (MANUAL) ou sem cmd/heartbeat da GS (AUTONOMO) por mais que isso -> para. 0.35 para caber nos 0,5 s da homologacao.",
+    "bateria_v_vazia/cheia: para calcular a % pela tensao do ESP32. null = publica so a tensao. CONFIRMAR com a eletronica (ex.: LiPo 3S = 9.9 e 12.6).",
+    "estados_do_seguidor: estado do seguir_tag.py -> estado do contrato (secao 3.1). A tag so orienta; CHEGOU = parado na posicao do artefato."
+  ],
+  "porta": 1883,
+  "v_max_m_s": 0.20,
+  "w_max_rad_s": 1.5,
+  "homem_morto_s": 0.35,
+  "udp_autonomo": 8095,
+  "bateria_v_vazia": null,
+  "bateria_v_cheia": null,
+  "estados_do_seguidor": {
+    "PROCURANDO": "BUSCA",
+    "PERDIDA": "BUSCA",
+    "ALINHANDO": "BUSCA_ARTEFATO",
+    "APROXIMANDO": "BUSCA_ARTEFATO",
+    "CHEGOU": "ARTEFATO_ENCONTRADO"
+  }
+}
