@@ -11,3 +11,8 @@ visao/pc/capturas/
 visao/pc/ajuste_distancia.json
 camera_server.log
 visao/pi/ajuste_distancia.json
+
+# ground station: senha da equipe e ambiente local
+ground_station/config_local.json
+ground_station/.venv/
+ground_station/logs/

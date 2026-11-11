@@ -31,7 +31,7 @@ dash.enviar(bateria=80, deteccoes=[{"classe": "cilindro", "conf": 0.91}])
 | `modo` | `"MANUAL"` | texto livre; MANUAL, AUTONOMO, RETORNO e PARADO ganham cor |
 | `tempo` | `"iniciar"` | `iniciar`, `pausar`, `continuar` ou `zerar`; ou `{"duracao": 240}` (padrão 4:00) |
 | `deteccoes` | `[{"classe": "cilindro", "conf": 0.91, "caixa": [x1, y1, x2, y2]}]` | acende o ícone da classe; apaga sozinho 1,5 s depois do último envio |
-| `video` | `{"vc": "http://IP:8080/stream", "vs": ""}` | URL de MJPEG ou imagem; `vc` = câmera do robô, `vs` = vista superior |
+| `video` | `{"vc": "http://127.0.0.1:8091/stream", "vs": "http://SERVIDOR:8889/arena/whep"}` | URL de MJPEG/imagem, ou WebRTC se terminar em `/whep`; `vc` = câmera do robô, `vs` = vista superior (o `gs_video.py` já manda a da arena) |
 | `pose` | `{"x": 1.2, "y": 0.4, "rumo": 90}` | robô no mapa da arena (metros, origem no canto inferior esquerdo, rumo em graus a partir do eixo x); aparece quando `vs` está vazio |
 | `arena` | `{"resgate": "SO"}` | canto da área de resgate no mapa: `NO`, `NE`, `SO` ou `SE` |
 | `mensagem` | `"capturando cilindro"` | texto verde no rodapé |

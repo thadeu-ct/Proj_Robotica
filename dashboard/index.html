@@ -42,7 +42,7 @@
     grid-template-rows: minmax(0, 1fr) auto auto; min-height: 0; }
 
   .video { overflow: hidden; display: flex; align-items: center; justify-content: center; }
-  .video img, .video canvas.mapa { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .video img, .video video, .video canvas.mapa { width: 100%; height: 100%; object-fit: contain; display: block; }
   .video canvas.caixas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .semsinal { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 1vmin; color: var(--fraco); font-size: 2.4vmin; font-weight: 700; letter-spacing: .1em; }
@@ -93,6 +93,7 @@
     <div class="painel video vs" id="vs">
       <span class="rotulo">VISTA SUPERIOR</span>
       <img id="vs-img" alt="" hidden>
+      <video id="vs-vid" autoplay muted playsinline hidden></video>
       <canvas id="vs-mapa" class="mapa" width="800" height="800"></canvas>
     </div>
     <div class="painel modo"><span class="titulo">MODO</span><span class="valor" id="modo">—</span></div>
@@ -117,6 +118,7 @@
   <div class="painel video vc" id="vc">
     <span class="rotulo">VISÃO DA CÂMERA</span>
     <img id="vc-img" alt="" hidden>
+    <video id="vc-vid" autoplay muted playsinline hidden></video>
     <canvas id="vc-caixas" class="caixas"></canvas>
   </div>
 
@@ -197,18 +199,69 @@ function desenharTempo() {
   $("tempo-estado").textContent = r <= 0 ? "fim" : t.rodando ? "rodando" : t.restante < t.duracao ? "pausado" : "parado";
 }
 
-// ---- videos (MJPEG ou imagem por URL; tenta de novo se cair)
-function ligarVideo(painel, img, url) {
+// ---- videos: MJPEG/imagem (<img>) ou WebRTC/WHEP (<video>, URL terminada em /whep); reconecta se cair
+const ehWhep = url => /\/whep(\?|$)/.test(url);
+const dormir = ms => new Promise(r => setTimeout(r, ms));
+
+function semSinal(painel, url, titulo = "SEM SINAL") {
+  if (!painel.querySelector(".semsinal")) painel.insertAdjacentHTML("beforeend",
+    `<div class="semsinal">${titulo}<small>${url.replace(/</g, "&lt;")}</small></div>`);
+}
+const comSinal = painel => painel.querySelector(".semsinal")?.remove();
+
+async function abrirWhep(painel, vid, url, sessao) {
+  vid.onplaying = () => { vid.hidden = false; comSinal(painel); };
+  while (sessao.ativo) {
+    const pc = new RTCPeerConnection();
+    sessao.pc = pc;
+    let recurso = null;
+    try {
+      pc.addTransceiver("video", { direction: "recvonly" });
+      pc.ontrack = ev => {   // o Chrome nao inicia autoplay em <video> escondido: mostra ja e da play
+        vid.srcObject = ev.streams[0] || new MediaStream([ev.track]);
+        vid.hidden = false;
+        vid.play().catch(() => {});
+      };
+      const caiu = new Promise(res => pc.onconnectionstatechange = () => {
+        if (["failed", "closed", "disconnected"].includes(pc.connectionState)) res();
+      });
+      await pc.setLocalDescription(await pc.createOffer());
+      await Promise.race([dormir(2000), new Promise(res => {   // espera os candidatos ICE (rede local: rapido)
+        if (pc.iceGatheringState === "complete") res();
+        pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && res();
+      })]);
+      const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/sdp" }, body: pc.localDescription.sdp });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      if (r.headers.get("Location")) recurso = new URL(r.headers.get("Location"), url).href;
+      await pc.setRemoteDescription({ type: "answer", sdp: await r.text() });
+      await caiu;
+    } catch (e) { console.warn("WHEP", url, e); }
+    pc.close();
+    if (recurso) fetch(recurso, { method: "DELETE" }).catch(() => {});
+    if (!sessao.ativo) return;
+    vid.hidden = true; vid.srcObject = null; semSinal(painel, url);
+    await dormir(2000);
+  }
+}
+
+function ligarVideo(painel, img, vid, url) {
   if (img.dataset.url === url) return;
   img.dataset.url = url;
   clearTimeout(img._retry);
-  painel.querySelector(".semsinal")?.remove();
-  if (!url) { img.hidden = true; img.removeAttribute("src"); return; }
-  img.onload = () => { img.hidden = false; painel.querySelector(".semsinal")?.remove(); };
+  if (vid._sessao) { vid._sessao.ativo = false; vid._sessao.pc?.close(); vid._sessao = null; }
+  comSinal(painel);
+  img.hidden = vid.hidden = true; img.removeAttribute("src"); vid.srcObject = null;
+  if (!url) return;
+  if (ehWhep(url)) {
+    semSinal(painel, url, "CONECTANDO");
+    vid._sessao = { ativo: true };
+    abrirWhep(painel, vid, url, vid._sessao);
+    return;
+  }
+  img.onload = () => { img.hidden = false; comSinal(painel); };
   img.onerror = () => {
     img.hidden = true;
-    if (!painel.querySelector(".semsinal")) painel.insertAdjacentHTML("beforeend",
-      `<div class="semsinal">SEM SINAL<small>${url.replace(/</g, "&lt;")}</small></div>`);
+    semSinal(painel, url);
     img._retry = setTimeout(() => { if (img.dataset.url === url) img.src = url; }, 2000);
   };
   img.src = url;
@@ -216,22 +269,22 @@ function ligarVideo(painel, img, url) {
 
 function desenharVideos() {
   const v = snap.estado.video || {};
-  ligarVideo($("vc"), $("vc-img"), v.vc || "");
-  if (!v.vc && !$("vc").querySelector(".semsinal"))
-    $("vc").insertAdjacentHTML("beforeend", '<div class="semsinal">SEM VÍDEO<small>envie {"video": {"vc": "http://IP:8080/stream"}}</small></div>');
-  ligarVideo($("vs"), $("vs-img"), v.vs || "");
+  ligarVideo($("vc"), $("vc-img"), $("vc-vid"), v.vc || "");
+  if (!v.vc) semSinal($("vc"), 'envie {"video": {"vc": "http://127.0.0.1:8091/stream"}}', "SEM VÍDEO");
+  ligarVideo($("vs"), $("vs-img"), $("vs-vid"), v.vs || "");
   $("vs-mapa").hidden = !!v.vs;
 }
 
 // caixas do YOLO por cima do video da camera (so se a deteccao trouxer "caixa")
 function desenharCaixas() {
-  const cv = $("vc-caixas"), img = $("vc-img"), r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  const cv = $("vc-caixas"), img = $("vc-vid").hidden ? $("vc-img") : $("vc-vid"), r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1;
   if (cv.width !== Math.round(r.width * dpr) || cv.height !== Math.round(r.height * dpr)) {
     cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
   }
   const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, r.width, r.height);
-  if (!snap || img.hidden || !img.naturalWidth || idade("deteccoes") > VALIDADE_DET) return;
-  const iw = img.naturalWidth, ih = img.naturalHeight, k = Math.min(r.width / iw, r.height / ih);
+  const iw = img.naturalWidth || img.videoWidth, ih = img.naturalHeight || img.videoHeight;
+  if (!snap || img.hidden || !iw || idade("deteccoes") > VALIDADE_DET) return;
+  const k = Math.min(r.width / iw, r.height / ih);
   const ox = (r.width - iw * k) / 2, oy = (r.height - ih * k) / 2;
   g.lineWidth = 3; g.font = `600 ${Math.max(12, r.height * .03)}px system-ui`; g.textBaseline = "bottom";
   for (const d of snap.estado.deteccoes || []) {
