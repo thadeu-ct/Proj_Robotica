@@ -1,93 +1,95 @@
-# Visão no computador (o Pi só manda a imagem)
+# visao/pc — o que roda no Mac
 
-O Raspberry Pi 3 só captura a webcam e transmite em MJPEG (`visao/pi/camera_server.py`).
-O computador recebe o vídeo e roda tudo:
+O Mac recebe o vídeo do Pi, roda o **YOLO** (`../pi/models/nano_LR.pt`, no chip da Apple via MPS) e desenha a **AprilTag calculada no Pi**: a distância e o ângulo vêm prontos do `/tags`. O resultado vai para uma janela e/ou para `:8091` (vídeo anotado e JSON), que é o que o dashboard usa.
 
-- **YOLO** (`visao/pi/models/nano_LR.pt`): caixas de ampulheta, anel_base, anel_haste, cilindro, icosaedro e peca_chata.
-- **AprilTag** (tag25h9, que é a do lab, e tag36h11): contorno, ID, **distância em cm** e ângulo (+ = tag à direita).
+## Arquivos
 
+| Arquivo | Papel |
+|---|---|
+| `detector_pc.py` | Programa principal: fonte de vídeo → YOLO → tags do Pi → desenho → janela / `:8091`. |
+| `visao_lib.py` | Leitores de vídeo (`StreamReader` para MJPEG, `UdpReader` para H.264/UDP, `LocalReader` para webcam ou arquivo), `PiTags` (lê o `/tags` do Pi) e `Camera`. A detecção da tag é importada de `../pi/apriltag_pi.py`. |
+| `classes_contrato.json` | **Tradução das classes do modelo para os artefatos do contrato.** Edite aqui, sem mexer em código. |
+| `calibrar_camera.py` | Calibra a câmera do Pi com o tabuleiro 8x5 do lab. Gera `../pi/camera_pi.json`. |
+| `iniciar.sh` / `parar.sh` | Modo laboratório: envia os arquivos ao Pi, sobe o servidor (MJPEG + tags) e abre a janela. / Para o servidor no Pi. |
+| `requirements.txt` | Dependências (`ultralytics`, `opencv-python`, `numpy`). O `iniciar.sh` cria o `.venv` sozinho com `uv`. |
+
+## Dois jeitos de rodar
+
+**1. Cadeia da competição (H.264):** o `ground_station/iniciar_gs.sh` liga tudo, inclusive este detector, com:
+```bash
+.venv/bin/python detector_pc.py --pi 192.168.1.70 --udp udp://127.0.0.1:5001 --saida-mjpeg 8091 --sem-janela
 ```
-Pi 3 (webcam USB) --MJPEG pelo Wi-Fi (ou túnel SSH)--> Mac: YOLO + AprilTag + janela
+O vídeo vem da cópia local do relay (`:5001`) e as tags vêm de `http://PI:8080/tags`. Ver `../../docs/ground_station.md`.
+
+**2. Laboratório (MJPEG, sem ground station):**
+```bash
+./iniciar.sh                 # Pi em 192.168.1.70; pede a senha uma vez (ou nenhuma, com chave ssh)
+./iniciar.sh 192.168.1.80    # outro IP
+TAG_MM=42 ./iniciar.sh       # lado da tag (padrão 42 mm, o tamanho do lab)
+./iniciar.sh local           # webcam do Mac, sem Pi (tag calculada aqui)
+./parar.sh                   # para o servidor no Pi
 ```
+Se a rede bloquear a porta 8080, o `iniciar.sh` passa o vídeo por um túnel SSH sozinho.
 
-## Na aula: passo a passo
+## Saída `:8091` (com `--saida-mjpeg 8091`)
 
-1. Ligue o Pi com a webcam USB e conecte o Mac **no mesmo Wi-Fi** do Pi.
-2. No Mac:
-   ```bash
-   cd ~/Proj_Robotica/visao/pc
-   ./iniciar.sh
-   ```
-   O script pede a senha do Pi uma vez. Depois ele envia o servidor de câmera, inicia esse servidor no Pi e abre a janela do detector.
-   - Se o IP mudou: `./iniciar.sh 192.168.1.XX`. Também dá para tentar `./iniciar.sh puc1.local`. Para descobrir o IP, rode no Pi: `hostname -I`.
-3. **Meça a tag**: o lado da borda preta externa, sem a margem branca. O padrão é 100 mm. Se for diferente:
-   `./iniciar.sh 192.168.1.70 --tag-mm 80`
-4. **Ajuste da distância** (30 segundos): ponha a tag a 50 cm da câmera, medidos com trena, de frente, e aperte **c** na janela. Isso corrige o erro da calibração e do tamanho da tag. Para usar outra distância de referência: `--dist-ref 40`.
-5. Para encerrar: **q** fecha a janela. O servidor continua rodando no Pi; para parar, use `./parar.sh`.
+- `/stream`: vídeo anotado (MJPEG). `/frame.jpg`: último quadro.
+- `/deteccoes`: o que está na imagem agora:
+  ```json
+  {"ts": 1794420516.0,
+   "objetos": [{"artifact": "hiperboloide", "classe_modelo": "ampulheta", "conf": 0.96, "box": [x1, y1, x2, y2]}],
+   "tags": [{"id": 0, "dist_cm": 58.2, "angulo_deg": 3.1}]}
+  ```
+  `artifact` usa o nome do contrato; `null` quer dizer que a classe do modelo não é um artefato (hoje, o `icosaedro`).
+- Por padrão escuta só em 127.0.0.1. Use `--saida-bind 0.0.0.0` para outras máquinas.
 
-### Teclas da janela
+## Classes do modelo → artefatos do contrato
+
+Arquivo `classes_contrato.json`, lido quando o detector inicia:
+
+| Modelo | Contrato |
+|---|---|
+| ampulheta | hiperboloide |
+| anel_haste | argola_pequena |
+| anel_base | argola_grande |
+| cilindro | cilindro |
+| peca_chata | exotico |
+| icosaedro | — (aparece na tela entre parênteses, mas não é publicado) |
+
+A associação foi feita pelo formato das peças nas fotos do dataset. Se a organização mudar os nomes, atualize `artefatos_validos`; o detector avisa no terminal quando o mapa aponta para um nome fora da lista.
+
+## Teclas da janela
 
 | Tecla | Ação |
 |---|---|
 | q / Esc | sair |
-| s | salvar a imagem (anotada e crua) em `pc/capturas/` |
-| c | ajustar a distância com UMA tag a `--dist-ref` cm (padrão 50) |
+| s | salvar a imagem (anotada e crua) em `capturas/` |
+| c | ajustar a distância: UMA tag a `--dist-ref` cm (padrão 50). O ajuste fica salvo **no Pi** |
 | r | zerar o ajuste |
-| y / a | liga ou desliga o YOLO / a AprilTag |
+| y / a | liga ou desliga o YOLO / o desenho da tag |
 | + / - | confiança mínima do YOLO (padrão 0,50) |
 
-### Calibrar a câmera (opcional, melhora a distância em ângulo e nas bordas)
+## Tag e calibração
 
-Hoje ele usa `camera_lab.json`, que foi calculado com as 6 fotos do tabuleiro de 23/09 (fx ≈ 826, cerca de 42° de campo). Para calibrar a câmera do Pi com o tabuleiro 8x5 do lab:
+- Tag do lab: **tag25h9, 42 mm** de borda preta. Para imprimir: `../tags/tags25h9_id0-7_42mm.pdf`, em 100%.
+- Com `--tag-mm 42` e a calibração padrão (`../pi/camera_lab.json`), a distância bateu com a trena (≈60 cm) **sem** nenhum ajuste de escala.
+- Para calibrar a câmera de verdade: `.venv/bin/python calibrar_camera.py --pi 192.168.1.70 --auto`. Mova o tabuleiro 8x5 por toda a imagem; com 20 capturas ele salva `../pi/camera_pi.json`. Depois rode `./iniciar.sh` para enviar o arquivo ao Pi.
 
-```bash
-.venv/bin/python calibrar_camera.py --pi 192.168.1.70 --auto
-```
+## Opções úteis do `detector_pc.py`
 
-Mova o tabuleiro devagar por toda a imagem (perto, longe, nos cantos, inclinado). Com 20 capturas ele salva `camera_pi.json`, e o detector passa a usar esse arquivo sozinho. O erro precisa ficar abaixo de 1 px; o ideal é abaixo de 0,5.
+`--pi IP` · `--udp URL` · `--url URL_MJPEG` · `--cam 0` · `--arquivo foto_ou_video` · `--tags-local` (calcula a tag no Mac) · `--conf 0.5` · `--imgsz 512` (tamanho do treino) · `--classes arquivo.json` · `--saida-mjpeg PORTA` · `--sem-janela` · `--quadros N` · `--salvar-cada N`. Lista completa: `-h`.
 
-## Se der problema
+## Problemas comuns
 
-| Sintoma | O que fazer |
+| Sintoma | Causa / o que fazer |
 |---|---|
-| `o Pi nao responde` | Mesmo Wi-Fi? Confira o IP com `hostname -I` no Pi e rode `./iniciar.sh IP_NOVO` |
-| SSH cai no meio | No Pi: `sudo iw wlan0 set power_save off` (power save do Wi-Fi) |
-| `nenhuma camera abriu` | Webcam conectada? No Pi: `ls /dev/video*`. Se outro programa estiver usando a câmera, o script fecha o `teste_visao.py` sozinho |
-| A janela fica em "Aguardando imagem..." | No Pi: `tmux attach -t cam` mostra o servidor (para sair sem parar: Ctrl+B, depois D) |
-| A rede bloqueia a porta 8080 | O `iniciar.sh` percebe e passa o vídeo por um túnel SSH sozinho |
-| Distância errada sempre na mesma proporção | Confira `--tag-mm` e faça o ajuste com a tecla **c** |
-| Vídeo travando ou lento | No Pi, rode o servidor com menos fps: `python camera_server.py --max-fps 12 --quality 70` |
+| Distância 2–3 vezes maior | `--tag-mm` errado. Meça a borda preta da tag (a do lab tem 42 mm). |
+| Vídeo com segundos de atraso | Wi-Fi do Pi 3 saturado (~300 KB/s). Não deixe MJPEG e H.264 abertos ao mesmo tempo; o `/status` do Pi mostra `clients`. |
+| Riscos na imagem por até 1 s | Perda de pacotes UDP no Wi-Fi; o vídeo se corrige no próximo keyframe. |
+| "Aguardando imagem..." | No Pi: `tmux attach -t cam` (sair sem parar: Ctrl+B, depois D). |
+| SSH cai | No Pi: `sudo iw wlan0 set power_save off`. |
 
-### Sem o script (manual, dois terminais)
+## Validação
 
-```bash
-# Terminal 1 (Mac -> Pi)
-scp ~/Proj_Robotica/visao/pi/camera_server.py puc@192.168.1.70:~/yolo/robotica/
-ssh puc@192.168.1.70
-cd ~/yolo/robotica && source ../.venv/bin/activate && python camera_server.py
-
-# Terminal 2 (Mac)
-cd ~/Proj_Robotica/visao/pc && .venv/bin/python detector_pc.py --pi 192.168.1.70
-```
-
-Para conferir só a câmera, sem processar nada, abra `http://192.168.1.70:8080` no navegador.
-
-## Testar sem o Pi
-
-```bash
-./iniciar.sh local                                     # webcam do Mac
-.venv/bin/python detector_pc.py --arquivo foto.jpg     # imagem ou vídeo
-```
-
-## Instalação (só se a pasta `.venv` não existir)
-
-O `iniciar.sh` cria o ambiente sozinho com `uv`. Para fazer à mão: `uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt`.
-O modelo (`visao/pi/models/`) fica fora do git; ele vem do `visao_pi.tar.gz`.
-
-## O que foi validado (10/11/2026, sem o Pi)
-
-- Distância da tag em imagens sintéticas com pose conhecida: erro abaixo de 1% de 18 a 180 cm, nas duas famílias, com a tag inclinada até 45°.
-- Fotos reais do lab (23/09): a tag25h9 ID 5 foi detectada a 47–69 cm em 4 das 6 fotos. Nas outras 2, a tag está tapada pelo dedo ou cortada pela borda. O `pupil-apriltags` não detectou nenhuma delas, e por isso a detecção usa o `cv2.aruco`.
-- YOLO no Mac (MPS): 109 de 109 objetos rotulados do dataset foram detectados com a classe certa (conf. 0,4), em cerca de 12 ms por quadro.
-- Fluxo completo `iniciar.sh` contra um "Pi" simulado (ssh/scp falsos rodando o script remoto): envio, servidor, vídeo direto e pelo túnel, detector. 20 fps (o limite do servidor), com cerca de 40 ms de atraso.
-- Reconexão: o detector espera e volta sozinho quando o servidor reinicia.
+- **Ontem (10/11), sem o Pi:** distância em tags sintéticas com erro < 1% de 18 a 180 cm; YOLO acertou 109 de 109 objetos rotulados do dataset; fluxo completo contra um "Pi" simulado.
+- **Hoje (11/11), com o Pi real:** tag a ~11 fps no Pi; distância conferida com a trena; H.264 conforme o §4.1; detector via UDP a ~10 fps, com YOLO em 10 ms.

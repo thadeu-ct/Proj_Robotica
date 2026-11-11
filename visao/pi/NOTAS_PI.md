@@ -57,3 +57,13 @@ Saídas em out/: CSV por quadro (latência, inferência, detecções) e imagens 
 - O `pupil-apriltags` não detectou a tag25h9 nas fotos reais; o `cv2.aruco` (DICT_APRILTAG_25h9) detectou. A pose vem de `solvePnP` IPPE_SQUARE.
 - Câmera: fx ≈ 826 px (cerca de 42° de campo horizontal), calculado com as 6 fotos do tabuleiro 8x5. A calibração antiga (fx 840, cx 262, k3 = 13) estava sobreajustada. Recalibrar com `calibrar_camera.py --auto`.
 - Dataset em `~/Downloads/fotos_robotica_yolo` (355 fotos). O `data.yaml` de lá lista as classes em outra ordem, mas o `nano_LR.pt` acerta 109 de 109 rótulos com os nomes que traz dentro dele, então não há troca de nomes.
+
+
+## 11/11/2026: Pi real, AprilTag embarcada e H.264
+
+- A AprilTag passou a rodar **no Pi** (`apriltag_pi.py`, thread no `camera_server.py`, publicada em `/tags`), porque o robô precisa pilotar sozinho. O Mac só desenha. Pi 3: 14–25 ms por quadro, cerca de 11 fps (limitado pela câmera).
+- **A tag do lab tem 42 mm** (medida com régua). Com o padrão antigo de 100 mm, o Pi marcava 150 cm para uma tag a 64 cm. Com `--tag-mm 42`, a distância bateu com a trena sem ajuste de escala, o que confirma a calibração `camera_lab.json` (fx 826).
+- O vídeo MJPEG acumulava 3 s de atraso: o Wi-Fi do Pi 3 dá cerca de 300 KB/s, e cada quadro tinha 33 KB a 11 fps. A solução foi JPEG 65 e um buffer de envio de 32 KB (o servidor descarta quadros velhos). Resultado: 10–11 fps com cerca de 100 ms de atraso.
+- H.264 para a ground station (contrato §4.1): `h264_v4l2m2m` com `-profile:v 578` (o encoder não aceita o nome), 10 fps fixos, GOP 10, `dump_extra`, 900 kbps. O relay conferiu pacote a pacote: Constrained Baseline, SPS/PPS em todo keyframe, 1 fatia por quadro.
+- Bugs corrigidos no Pi real: `pkill -f camera_server.py` matava a própria sessão ssh (use `[c]amera_server.py`); um método chamado `_stderr` numa subclasse de `Thread` colidia com o atributo interno do Python, e o ffmpeg ficava sem leitor do stderr e caiu uma vez.
+- Webcam: só YUYV (sem MJPEG nativo). Pi: Debian 13 trixie, ffmpeg 7.1.3, OpenCV 5.0 no `~/yolo/.venv` (Python 3.10).

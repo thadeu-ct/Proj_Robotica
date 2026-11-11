@@ -67,6 +67,6 @@ Instalação (uma vez): `cd ground_station && uv venv --python 3.12 .venv && uv 
 ## Pendências
 
 - **Telemetria MQTT (§3)**: `status` com Last Will, `state`, `mode`, `battery`, `detection`, comandos `cmd/*` e homem‑morto de 0,5 s. Ainda não feito.
-- **Classes do YOLO × contrato**: o modelo atual usa `ampulheta`, `anel_base`, `anel_haste`, `cilindro`, `icosaedro` e `peca_chata`; o contrato usa `hiperboloide`, `argola_pequena`, `argola_grande`, `cilindro` e `exotico`. Falta definir o mapeamento (ou retreinar) antes de publicar `detection`.
+- **Classes do YOLO × contrato**: resolvido em `visao/pc/classes_contrato.json` (ampulheta→hiperboloide, anel_haste→argola_pequena, anel_base→argola_grande, cilindro→cilindro, peca_chata→exotico, icosaedro→não publicado). O detector já usa os nomes do contrato e publica a lista em `http://127.0.0.1:8091/deteccoes` (campo `artifact`). Para mudar a associação, edite só o JSON. Falta publicar `detection` no MQTT.
 - **Perda no Wi‑Fi do Pi 3**: às vezes aparecem riscos até o próximo keyframe. Com o MJPEG do `:8080` desligado sobra banda; vale testar no Wi‑Fi da arena.
 - **Pacote de referência** (`referencia/`: `gs_relay.py`, `robo_video.py`, `sim_rover.py`): não está no repo. Se a organização mandar, comparar com o nosso relay e rodar o `sim_rover.py`.

@@ -20,6 +20,7 @@ Teclas na janela:
     + / -    confianca minima do YOLO
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -43,12 +44,14 @@ fonte.add_argument("--udp", default=None, help="H.264 MPEG-TS por UDP (ex.: udp:
 fonte.add_argument("--cam", default=None, help="webcam deste computador (indice), para testar sem o Pi")
 fonte.add_argument("--arquivo", default=None, help="imagem ou video, para testar sem camera")
 p.add_argument("--modelo", default=MODELO_PADRAO)
+p.add_argument("--classes", default=os.path.join(AQUI, "classes_contrato.json"),
+               help="JSON que traduz classe do modelo -> artefato do contrato (edite la, nao no codigo)")
 p.add_argument("--imgsz", type=int, default=512, help="o modelo foi treinado em 512")
 p.add_argument("--conf", type=float, default=0.50)
 p.add_argument("--device", default="auto", help="auto, mps, cpu ou cuda")
 p.add_argument("--tags-local", action="store_true", help="calcula a AprilTag aqui em vez de usar a do Pi")
 p.add_argument("--tag-familias", default="25h9,36h11", help="(so com tag local) familias de AprilTag")
-p.add_argument("--tag-mm", type=float, default=100.0, help="lado da tag em mm: borda preta externa, sem a margem branca")
+p.add_argument("--tag-mm", type=float, default=42.0, help="(so com tag local) lado da tag em mm: borda preta, sem a margem branca; a do lab tem 42")
 p.add_argument("--tag-ids", default=None, help="so considerar esses IDs (ex.: 5,7)")
 p.add_argument("--camera", default=None, help="JSON de calibracao (padrao: visao/pi/camera_pi.json, senao camera_lab.json)")
 p.add_argument("--dist-ref", type=float, default=50.0, help="distancia real (cm) usada na tecla c")
@@ -78,6 +81,27 @@ log(f"[modelo] carregando {os.path.relpath(args.modelo)}")
 model = YOLO(args.modelo, task="detect")
 NAMES = model.names if isinstance(model.names, dict) else dict(enumerate(model.names))
 log(f"[modelo] classes: {NAMES}")
+
+
+def carregar_mapa_classes(path):
+    """classe do modelo -> nome do artefato no contrato (None = nao e artefato). Arquivo: classes_contrato.json."""
+    if not os.path.exists(path):
+        log(f"[classes] {path} nao existe: usando os nomes do modelo")
+        return {n: n for n in NAMES.values()}
+    with open(path) as f:
+        cfg = json.load(f)
+    mapa, validos = cfg.get("mapa", {}), set(cfg.get("artefatos_validos", []))
+    for nome in NAMES.values():
+        if nome not in mapa:
+            log(f"[classes] AVISO: classe '{nome}' do modelo nao esta no mapa; nao vai virar artefato")
+    for k, v in mapa.items():
+        if v is not None and validos and v not in validos:
+            log(f"[classes] AVISO: '{k}' -> '{v}', mas '{v}' nao esta em artefatos_validos")
+    log("[classes] " + ", ".join(f"{k}->{v or '-'}" for k, v in mapa.items()))
+    return mapa
+
+
+MAPA_CLASSES = carregar_mapa_classes(args.classes)
 
 
 def escolher_device():
@@ -147,7 +171,9 @@ def desenhar(img, dets, tags, hud, msg):
         x1, y1, x2, y2 = map(int, d["xyxy"])
         cor = COR.get(d["cls"], (0, 255, 255))
         cv2.rectangle(img, (x1, y1), (x2, y2), cor, 2)
-        texto(img, f"{d['nome']} {d['conf']:.2f}", (x1, y1 - 6), (0, 0, 0), 0.55, cor)
+        # nome do contrato; classe fora do contrato aparece com o nome do modelo entre parenteses
+        rotulo = d["artefato"] if d["artefato"] else f"({d['nome']})"
+        texto(img, f"{rotulo} {d['conf']:.2f}", (x1, y1 - 6), (0, 0, 0), 0.55, cor)
     for t in tags:
         pts = t["corners"].astype(int)
         cv2.polylines(img, [pts.reshape(-1, 1, 2)], True, (0, 255, 0), 2)
@@ -192,6 +218,7 @@ if args.saida_mjpeg:
         def __init__(self):
             self.cond = threading.Condition()
             self.jpg, self.seq, self.clientes = None, 0, 0
+            self.deteccoes = {"ts": 0, "objetos": [], "tags": []}   # servido em /deteccoes
 
         def put(self, img):
             if self.clientes <= 0 and self.jpg is not None and self.seq % 10:
@@ -214,6 +241,15 @@ if args.saida_mjpeg:
 
         def do_GET(self):
             path = self.path.split("?")[0]
+            if path == "/deteccoes":
+                body = json.dumps(saida.deteccoes).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if path == "/frame.jpg":
                 jpg = saida.jpg
                 if jpg is None:
@@ -312,7 +348,9 @@ try:
                 clss = r.boxes.cls.cpu().numpy().astype(int)
                 for b, c, k in zip(xyxy, confs, clss):
                     if np.all(np.isfinite(b)):
-                        dets.append({"xyxy": b, "conf": float(c), "cls": int(k), "nome": NAMES.get(int(k), str(k))})
+                        nome = NAMES.get(int(k), str(k))
+                        dets.append({"xyxy": b, "conf": float(c), "cls": int(k), "nome": nome,
+                                     "artefato": MAPA_CLASSES.get(nome)})
 
         tags = []
         snap = None
@@ -347,6 +385,14 @@ try:
         desenhar(anot, dets, tags, hud, msg)
         ultimo = (anot, tags)
         if saida is not None:
+            saida.deteccoes = {
+                "ts": time.time(),
+                # "artifact" usa o nome do contrato (null = classe do modelo fora do contrato)
+                "objetos": [{"artifact": d["artefato"], "classe_modelo": d["nome"], "conf": round(d["conf"], 3),
+                             "box": [round(float(v), 1) for v in d["xyxy"]]} for d in dets],
+                "tags": [{"id": t["id"], "dist_cm": round(t["dist_m"] * 100, 1), "angulo_deg": round(t["angulo_deg"], 1)}
+                         for t in tags if "dist_m" in t],
+            }
             saida.put(anot)
         n += 1
 
@@ -355,7 +401,7 @@ try:
             cv2.imwrite(os.path.join(CAPTURAS, f"quadro_{time.strftime('%H%M%S')}_{n:05d}.jpg"), anot)
 
         if time.time() - t_print >= 1.0:
-            objs = ", ".join(f"{d['nome']} {d['conf']:.2f}" for d in dets) or "-"
+            objs = ", ".join(f"{d['artefato'] or '(' + d['nome'] + ')'} {d['conf']:.2f}" for d in dets) or "-"
             tg = ", ".join(f"ID{t['id']} {t['dist_m'] * 100:.1f}cm {t['angulo_deg']:+.0f}°" for t in tags if "dist_m" in t) or "-"
             log(f"proc {fps_proc:4.1f} fps | atraso {np.mean(lat_hist):4.0f} ms | objetos: {objs} | tags: {tg}")
             t_print = time.time()

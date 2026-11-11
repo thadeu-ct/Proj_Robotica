@@ -1,0 +1,20 @@
+{
+  "_leia": [
+    "Traduz as classes do modelo YOLO (nano_LR.pt) para os nomes de artefato do contrato da competicao (docs/contrato_interface.md).",
+    "Para mudar a associacao, edite so o bloco 'mapa'. Nao e preciso mexer em codigo; o detector_pc.py le este arquivo ao iniciar.",
+    "Valor null = a classe aparece na tela com o nome do modelo, mas NAO vira artefato (nao e publicada como deteccao).",
+    "Se o contrato mudar a lista de artefatos, atualize 'artefatos_validos'; o detector avisa no terminal quando o mapa aponta para algo fora dela.",
+    "Associacao inicial (11/11/2026), feita pelo formato das pecas nas fotos do dataset: ampulheta tem forma de hiperboloide;",
+    "anel_haste e a argola pequena sobre uma haste; anel_base e a argola grande sobre uma base; peca_chata e a peca de formato incomum (exotico);",
+    "icosaedro (D20) nao e um dos artefatos do contrato."
+  ],
+  "artefatos_validos": ["hiperboloide", "argola_pequena", "argola_grande", "cilindro", "exotico"],
+  "mapa": {
+    "ampulheta": "hiperboloide",
+    "anel_haste": "argola_pequena",
+    "anel_base": "argola_grande",
+    "cilindro": "cilindro",
+    "peca_chata": "exotico",
+    "icosaedro": null
+  }
+}
