@@ -5,12 +5,19 @@
 #   3. ver_video.py         POV cru em http://localhost:8092/stream (reserva, sem depender do detector)
 #   4. Pi                   reinicia o camera_server mandando H.264 para ESTE Mac (:5000)
 #   5. detector_pc.py       YOLO lendo udp://127.0.0.1:5001, anotado em http://localhost:8091/stream
+#   6. Pi: robo_agente.py   MQTT do robo (status/state/mode/battery, cmd/*, homem-morto), dono da serial do ESP32
+#   7. gs_mqtt.py           controle do operador em http://localhost:8001 + heartbeat + detection + dashboard
 #
 #   ./iniciar_gs.sh                     # tudo; servidor/id/senha vem do config_local.json
 #   ./iniciar_gs.sh --sem-servidor      # sem publicar no servidor (treino no lab)
 #   SEM_PI=1 ./iniciar_gs.sh            # nao mexe no Pi (ex.: robo_simulado.py)
 #   SEM_DETECTOR=1 ./iniciar_gs.sh      # dashboard mostra o POV cru (:8092)
 #   PI_IP=192.168.0.50 ./iniciar_gs.sh  # IP do Pi na rede da arena
+#   MOTORES=1 ./iniciar_gs.sh           # o agente do robo manda de verdade para o ESP32 (sem isso: simulado)
+#   SEM_MQTT=1 ./iniciar_gs.sh          # sem o agente do robo e sem o gs_mqtt
+#
+# O config_local.json (servidor, id, senha) vale para tudo: video, gs_mqtt e o agente do Pi (vai por scp).
+# --sem-servidor desliga tambem o MQTT (nao ha broker).
 #
 # Parar tudo: ./parar_gs.sh    Logs: ground_station/logs/
 set -euo pipefail
@@ -60,10 +67,29 @@ if [ -z "${SEM_PI:-}" ]; then
     || warn "nao consegui iniciar o Pi; o relay fica esperando video em :5000"
 fi
 
+SEM_SERVIDOR=""
+for a in "$@"; do [ "$a" = "--sem-servidor" ] && SEM_SERVIDOR=1; done
+if [ -z "${SEM_MQTT:-}" ] && [ -z "$SEM_SERVIDOR" ]; then
+  [ -f "$GS/config_local.json" ] || die "falta ground_station/config_local.json (servidor, id, senha)"
+  if [ -z "${SEM_PI:-}" ]; then
+    if [ -n "${MOTORES:-}" ]; then TXT_MOTORES="REAIS"; else TXT_MOTORES="simulados (MOTORES=1 para valer)"; fi
+    say "Pi: agente MQTT do robo (tmux 'mqtt'; motores $TXT_MOTORES)"
+    ssh -o ConnectTimeout=5 "$PI_USER@$PI_IP" "mkdir -p yolo/robotica/mqtt yolo/robotica/controle" \
+      && scp -q "$RAIZ/mqtt/robo_agente.py" "$RAIZ/mqtt/config_robo.json" "$PI_USER@$PI_IP:yolo/robotica/mqtt/" \
+      && scp -q "$GS/config_local.json" "$PI_USER@$PI_IP:yolo/robotica/mqtt/config_local.json" \
+      && scp -q "$RAIZ/controle/protocolo_esp32.py" "$RAIZ/controle/config_seguir.json" "$PI_USER@$PI_IP:yolo/robotica/controle/" \
+      && ssh -o ConnectTimeout=5 "$PI_USER@$PI_IP" \
+        "tmux kill-session -t mqtt 2>/dev/null; cd yolo/robotica/mqtt && tmux new -d -s mqtt '../../.venv/bin/python -u robo_agente.py ${MOTORES:+--motores} 2>&1 | tee agente.log'" \
+      || warn "nao consegui iniciar o agente MQTT no Pi"
+  fi
+  say "MQTT da GS: controle do operador em http://localhost:8001"
+  rodar gs_mqtt "$PY" -u "$GS/gs_mqtt.py"
+fi
+
 VC="http://127.0.0.1:8092/stream"
 if [ -z "${SEM_DETECTOR:-}" ] && [ -x "$PY_DET" ]; then
   say "detector (YOLO) anotado em http://localhost:8091/stream"
-  rodar detector "$PY_DET" -u "$RAIZ/visao/pc/detector_pc.py" --pi "$PI_IP" --udp udp://127.0.0.1:5001 --saida-mjpeg 8091 --sem-janela
+  rodar detector "$PY_DET" -u "$RAIZ/visao/pc/detector_pc.py" --pi "$PI_IP" --udp udp://127.0.0.1:5001 --saida-mjpeg 8091 --dashboard http://127.0.0.1:8000 --sem-janela
   VC="http://127.0.0.1:8091/stream"
 fi
 curl -s -X POST localhost:8000/api/estado -d "{\"video\": {\"vc\": \"$VC\"}}" >/dev/null || warn "dashboard nao respondeu"
@@ -72,4 +98,5 @@ sleep 4
 say "estado do relay:"
 tail -n 6 "$LOGS/gs_video.log" || true
 echo
-say "pronto. Dashboard: http://localhost:8000  (F = tela cheia)   Logs: $LOGS   Parar: $GS/parar_gs.sh"
+[ -f "$LOGS/gs_mqtt.pid" ] && { say "estado do MQTT:"; tail -n 4 "$LOGS/gs_mqtt.log" || true; echo; }
+say "pronto. Dashboard: http://localhost:8000 (F = tela cheia)  Controle: http://localhost:8001  Logs: $LOGS  Parar: $GS/parar_gs.sh"

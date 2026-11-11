@@ -39,6 +39,7 @@ estado = {
     "bateria": None,                 # 0 a 100 (%)
     "tensao": None,                  # volts, opcional
     "modo": "AGUARDANDO",
+    "estado": "",                    # fase do contrato (IDLE, BUSCA, NAVEGACAO...), mostrada sob o modo
     "mensagem": "",
     "deteccoes": [],                 # [{"classe": "cilindro", "conf": 0.91, "caixa": [x1, y1, x2, y2]}]
     "pose": None,                    # {"x": m, "y": m, "rumo": graus}

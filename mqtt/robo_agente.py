@@ -13,13 +13,15 @@ de 250 ms do ESP32. Quem manda a velocidade depende do modo:
   MANUAL    cmd/vel da ground station (normalizado -1..1, vezes v_max / w_max)
   AUTONOMO  o controle autonomo (controle/seguir_tag.py --agente), por UDP em 127.0.0.1:8095
 
-Homem-morto (contrato 3.2 e homologacao 8): para os motores se ficar mais de homem_morto_s (0,35 s) sem
-  - cmd/vel, no MANUAL (a GS manda a 10 Hz enquanto ha comando);
-  - cmd/heartbeat da GS, no AUTONOMO (nosso topico; o gs_mqtt.py manda a 10 Hz): GS desligada ou rede caida -> para;
-  - o controle autonomo (UDP), no AUTONOMO;
+Homem-morto (contrato 3.2 e homologacao 8): para os motores se ficar sem
+  - cmd/vel por mais de homem_morto_s (0,35 s), no MANUAL (a GS manda a 10 Hz enquanto ha comando);
+  - cmd/heartbeat da GS por mais de homem_morto_autonomo_s (1 s), no AUTONOMO (nosso topico; o gs_mqtt.py
+    manda a 10 Hz): GS desligada ou rede caida -> para;
+  - o controle autonomo (UDP local) por mais de homem_morto_s, no AUTONOMO;
   - conexao com o broker, nos dois modos.
-0,35 s e nao 0,5 s: a homologacao mede da GS desligada ate o robo parar (<= 0,5 s), e o ultimo cmd/vel
-chega ate 100 ms antes disso.
+0,35 s e nao 0,5 s no MANUAL: a homologacao mede da GS desligada ate o robo parar (<= 0,5 s), e o ultimo
+cmd/vel chega ate 100 ms antes disso. 1 s no AUTONOMO: no Wi-Fi do Pi 3 o MQTT as vezes atrasa ate 0,5 s
+(medido em 11/11), e 0,35 s faria o robo dar trancos sozinho.
 
 Uso:
     python3 robo_agente.py                       # le config_local.json (servidor, id, senha); motores SIMULADOS
@@ -72,6 +74,8 @@ p.add_argument("--baud", type=int, default=CFG_SEGUIR.get("baud", 460800))
 p.add_argument("--v-max", type=float, default=cfg.get("v_max_m_s", 0.20), help="m/s quando cmd/vel linear = 1")
 p.add_argument("--w-max", type=float, default=cfg.get("w_max_rad_s", 1.5), help="rad/s quando cmd/vel angular = 1")
 p.add_argument("--homem-morto", type=float, default=cfg.get("homem_morto_s", 0.35), help="s sem comando -> para")
+p.add_argument("--homem-morto-autonomo", type=float, default=cfg.get("homem_morto_autonomo_s", 1.0),
+               help="s sem cmd/heartbeat da GS no AUTONOMO -> para")
 p.add_argument("--autonomo-sem-gs", action="store_true", default=cfg.get("autonomo_sem_gs", False),
                help="no AUTONOMO, nao exige o cmd/heartbeat da GS (so para teste)")
 p.add_argument("--udp", type=int, default=cfg.get("udp_autonomo", 8095), help="porta UDP do controle autonomo")
@@ -255,8 +259,8 @@ class Agente:
             if agora - t > args.homem_morto:
                 return 0.0, 0.0, "sem cmd/vel ha mais de %.2f s" % args.homem_morto
             return lin * args.v_max, ang * args.w_max, None
-        if not args.autonomo_sem_gs and agora - self.t_gs > args.homem_morto:
-            return 0.0, 0.0, "sem heartbeat da GS ha mais de %.2f s" % args.homem_morto
+        if not args.autonomo_sem_gs and agora - self.t_gs > args.homem_morto_autonomo:
+            return 0.0, 0.0, "sem heartbeat da GS ha mais de %.2f s" % args.homem_morto_autonomo
         v, w, t = self.auto
         if agora - t > args.homem_morto:
             return 0.0, 0.0, "controle autonomo calado ha mais de %.2f s" % args.homem_morto

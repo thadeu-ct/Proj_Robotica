@@ -14,6 +14,6 @@ python3 robo_agente.py --motores       # manda para o ESP32 (serial/baud de cont
 | `robo_agente.py` | o agente |
 | `config_robo.json` | parâmetros: v_max/w_max do MANUAL, homem‑morto (0,35 s), porta UDP do autônomo, bateria e mapeamento de estados |
 | `config_local.json` | servidor, id e senha (fora do git; no Pi vem do `ground_station/config_local.json`) |
-| `testar_agente.py` | autoteste estilo homologação: `python testar_agente.py --servidor 127.0.0.1 --id rover03 --senha X` |
+| `testar_agente.py` | autoteste estilo homologação: `python testar_agente.py --servidor 127.0.0.1 --id rover03 --senha X`. **Desligue antes o agente do Pi e o `gs_mqtt.py`** (mesmo client_id) |
 
 Quem manda a velocidade: no **MANUAL**, o `cmd/vel` da GS; no **AUTONOMO**, o `controle/seguir_tag.py --agente` por UDP em `127.0.0.1:8095` (`{"v", "w", "estado"}`), traduzindo o estado para o contrato pelo `config_robo.json`.

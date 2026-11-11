@@ -6,6 +6,8 @@ Sobe o agente (motores simulados), conversa com ele pelo broker e mede o homem-m
     python testar_agente.py --servidor 127.0.0.1 --id rover03 --senha SENHA
 
 Precisa de um broker MQTT no ar (o da competicao ou um local de teste).
+ATENCAO: o agente de teste usa o client_id do robo (<id>). Desligue o agente do Pi e o gs_mqtt.py antes:
+com os dois no ar o broker derruba um deles (mesmo client_id) e o heartbeat da GS de verdade estraga o teste.
 """
 import argparse
 import json
@@ -163,8 +165,11 @@ try:
     for i in range(20):
         udp.sendto(json.dumps({"v": 0.1, "w": 0.0, "estado": "APROXIMANDO"}).encode(), ("127.0.0.1", args.udp))
         time.sleep(0.05)
-    parou = esperar_log(r"homem-morto: parado \(sem heartbeat da GS", t_gs, 1)
-    checar("8. GS calada no AUTONOMO -> para em <= 0,5 s", parou is not None and parou[0] - t_gs <= 0.5,
+    for i in range(20):
+        udp.sendto(json.dumps({"v": 0.1, "w": 0.0, "estado": "APROXIMANDO"}).encode(), ("127.0.0.1", args.udp))
+        time.sleep(0.05)
+    parou = esperar_log(r"homem-morto: parado \(sem heartbeat da GS", t_gs, 2)
+    checar("8. GS calada no AUTONOMO -> para em <= 1 s (homem_morto_autonomo_s)", parou is not None and parou[0] - t_gs <= 1.0,
            "%.0f ms depois do ultimo heartbeat" % ((parou[0] - t_gs) * 1000) if parou else "nao parou")
 
     # 2. battery

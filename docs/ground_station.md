@@ -1,6 +1,6 @@
-# Ground station (vídeo) — como a equipe cumpre o contrato
+# Ground station — como a equipe cumpre o contrato
 
-Contrato da organização: [`contrato_interface.md`](contrato_interface.md). Esta página cobre o **vídeo** (§4) e a tela da equipe. A telemetria MQTT (§3) ainda não foi feita.
+Contrato da organização: [`contrato_interface.md`](contrato_interface.md). Esta página cobre o **vídeo** (§4), a **telemetria MQTT** (§3) e a tela da equipe.
 
 ## Caminho do vídeo
 
@@ -13,7 +13,17 @@ Contrato da organização: [`contrato_interface.md`](contrato_interface.md). Est
                                                                   └─► udp://127.0.0.1:5002 ─► ver_video.py ─► :8092/stream (POV cru, reserva)
 
  SERVIDOR :8889/arena/whep ──WebRTC/WHEP──► dashboard (navegador) — painel "Vista superior"
- dashboard :8000  =  V.C. (:8091 ou :8092)  +  V.S. (câmera da arena)  +  modo, itens, tempo, bateria
+ dashboard :8000  =  V.C. (:8091 ou :8092)  +  V.S. (câmera da arena)  +  modo, estado, itens, tempo, bateria
+```
+
+## Caminho do MQTT
+
+```
+ Pi: robo_agente.py (dono da serial do ESP32)              broker do SERVIDOR :1883            Mac: gs_mqtt.py
+   publica status (LWT offline), state, mode, battery ──►    rover/<id>/#     ◄── cmd/vel, stop, mode, state, arm, gripper
+   assina rover/<id>/cmd/#                           ◄──                      ◄── cmd/heartbeat a 10 Hz (sinal de vida da GS)
+   CMD_VEL a 20 Hz para o ESP32                                               ◄── detection (YOLO, 1 por parada)
+   ▲ UDP 127.0.0.1:8095: (v, w, estado) do controle/seguir_tag.py --agente     ──► arena/state → tempo no dashboard
 ```
 
 | Parte | Onde | Quem mantém |
@@ -22,51 +32,89 @@ Contrato da organização: [`contrato_interface.md`](contrato_interface.md). Est
 | Relay UDP → WHIP + cópias locais | `ground_station/gs_video.py` | ground station |
 | POV cru em MJPEG | `ground_station/ver_video.py` | ground station |
 | YOLO no Mac | `visao/pc/detector_pc.py --udp udp://127.0.0.1:5001 --saida-mjpeg 8091` | visão |
+| Agente MQTT do robô (Pi) | `mqtt/robo_agente.py` (parâmetros em `mqtt/config_robo.json`) | ground station |
+| Controle autônomo (Pi) | `controle/seguir_tag.py --agente` | visão |
+| MQTT da GS e controle do operador | `ground_station/gs_mqtt.py` + `controle.html` (`config_gs.json`) | ground station |
 | Tela da equipe | `dashboard/` (WHEP da arena + MJPEG da câmera) | ground station |
 
 ## Dia da prova
 
 1. Conectar o Mac e o Pi no Wi‑Fi da arena. Anotar o IP do Pi.
-2. Criar `ground_station/config_local.json` (fora do git), a partir do `config_exemplo.json`:
+2. Criar `ground_station/config_local.json` (fora do git), a partir do `config_exemplo.json`. Esse arquivo vale para tudo (vídeo, MQTT da GS e agente do Pi, que o recebe por `scp`):
    ```json
    {"servidor": "IP_DO_SERVIDOR", "id": "roverNN", "senha": "SENHA_DA_EQUIPE"}
    ```
-3. Ligar tudo: `PI_IP=<ip do pi> ground_station/iniciar_gs.sh`
+3. Ligar tudo: `PI_IP=<ip do pi> MOTORES=1 ground_station/iniciar_gs.sh`
    - sobe o dashboard, o relay, o POV cru e o detector, e reinicia o Pi mandando H.264 para o IP atual do Mac
-   - o relay avisa o dashboard da URL da câmera da arena (`http://IP_DO_SERVIDOR:8889/arena/whep`)
-4. Abrir `http://localhost:8000` e apertar F (tela cheia).
-5. Conferir no navegador: `http://IP_DO_SERVIDOR:8080/arena.html?path=rover/<id>` mostra o nosso vídeo (homologação 3).
-6. Parar: `ground_station/parar_gs.sh`. Logs em `ground_station/logs/`.
+   - instala e liga o agente MQTT no Pi (tmux `mqtt`). **Sem `MOTORES=1` os motores ficam simulados.**
+   - liga o `gs_mqtt.py`: controle do operador em `http://localhost:8001`
+4. Abrir `http://localhost:8000` (F = tela cheia) e, para o operador, `http://localhost:8001`.
+5. Homologação (contrato §6): ver a tabela abaixo.
+6. Parar: `ground_station/parar_gs.sh` (o robô para sozinho pelo homem‑morto). Logs em `ground_station/logs/`; o agente do Pi aparece com `ssh puc@<IP> -t tmux attach -t mqtt`.
 
-Sem o servidor (treino no lab): `ground_station/iniciar_gs.sh --sem-servidor`. Sem o robô: `SEM_PI=1 ground_station/iniciar_gs.sh --sem-servidor` e, em outro terminal, `ground_station/.venv/bin/python ground_station/robo_simulado.py --segundos 0`.
+Sem o servidor (treino no lab): `ground_station/iniciar_gs.sh --sem-servidor` (sem MQTT). Sem o robô: `SEM_PI=1 ground_station/iniciar_gs.sh --sem-servidor` e, em outro terminal, `ground_station/.venv/bin/python ground_station/robo_simulado.py --segundos 0`.
 
-Instalação (uma vez): `cd ground_station && uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt`. Não precisa de ffmpeg no Mac: o PyAV já traz as bibliotecas.
+Instalação (uma vez): `cd ground_station && uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt`. Não precisa de ffmpeg no Mac: o PyAV já traz as bibliotecas. No Pi, o `~/yolo/.venv` já tem `paho-mqtt` e `pyserial`.
 
-## O que o relay garante
+## Operador (`http://localhost:8001`)
+
+| Tecla / botão | Faz |
+|---|---|
+| W A S D ou setas | `cmd/vel` a 10 Hz enquanto segura; zeros ao soltar. Velocidade máxima no controle deslizante |
+| Espaço / PARAR | `cmd/stop`: o robô zera os motores e volta para MANUAL + IDLE |
+| M / N | `cmd/mode` MANUAL / AUTONOMO (o robô confirma em `rover/<id>/mode`) |
+| botões de fase | `cmd/state` (nosso tópico): o operador declara a fase (ex.: COLETA). No AUTONOMO, quem manda na fase é o controle |
+| O / F | garra: abrir / fechar (`cmd/gripper`) |
+| posições do braço | `cmd/arm` com os presets de `config_gs.json` (vazio até o braço ser definido) |
+| detecção | automática: **1 por parada em ARTEFATO_ENCONTRADO**, com a classe estável por 1 s e conf ≥ 0,6, pegando a peça de maior caixa; a mesma classe não se repete em 30 s (sobrevive a reinício da GS). Botão manual pede confirmação (2 cliques) |
+
+A página avisa quando o robô está em MANUAL em NAVEGACAO ou BUSCA_ARTEFATO (o juiz recebe alerta e aplica penalidade).
+
+## Homem‑morto (contrato §3.2, homologação 8)
+
+O agente do Pi zera os motores se ficar sem:
+- `cmd/vel` por mais de **0,35 s** (MANUAL);
+- `cmd/heartbeat` da GS por mais de **1 s** (AUTONOMO): GS desligada ou rede caída → para;
+- o controle autônomo (UDP local) por mais de 0,35 s; `PARADO` do `seguir_tag` para na hora;
+- conexão com o broker (os dois modos).
+
+0,35 s no MANUAL, e não 0,5 s, porque o juiz mede da GS desligada até o robô parar (≤ 0,5 s), e o último `cmd/vel` chega até 100 ms antes. 1 s no AUTONOMO porque, no Wi‑Fi do Pi 3 com o vídeo no ar, o MQTT às vezes chega até ~540 ms atrasado; com 0,35 s o robô autônomo dava trancos sozinho. Os dois valores ficam em `mqtt/config_robo.json`. O agente manda CMD_VEL a 20 Hz (zeros quando parado), o que também alimenta o watchdog de 250 ms do ESP32.
+
+## O que o relay de vídeo garante
 
 - **Não recodifica**: os pacotes H.264 do Pi vão direto para o RTP (aiortc), como pede o §4.3. O WHIP negocia só H.264.
 - **Confere o §4.1 a cada 5 s** e imprime `AVISO (contrato 4.1)` se o vídeo sair do padrão: codec, perfil, B‑frames, 640×480, fps, kbps, intervalo de keyframe, SPS/PPS em todo keyframe e 1 fatia por quadro.
-- **Autenticação**: `Authorization: Bearer <id>:<senha>` (padrão do contrato); `--auth basic` se o servidor pedir HTTP Basic.
+- **Autenticação**: `Authorization: Bearer <id>:<senha>` (padrão do contrato); `--auth basic` se o servidor pedir HTTP Basic. O MediaMTX aceita os dois.
+- **Só conecta com vídeo chegando**: o MediaMTX derruba a sessão WHIP se o vídeo não chega em ~2 s.
 - **Reconexão**: se o servidor recusar ou a conexão cair, tenta de novo (1, 2, 4… até 10 s). Ao sair com Ctrl+C ou `parar_gs.sh`, encerra a sessão WHIP (DELETE).
-- **Robô que reinicia**: se o vídeo parar ou o tempo do Pi voltar para trás, o relay emenda a linha do tempo (o RTP e as cópias locais nunca recebem tempo voltando). As cópias locais sempre começam num keyframe.
+- **Robô que reinicia**: se o vídeo parar ou o tempo do Pi voltar para trás, o relay emenda a linha do tempo. As cópias locais sempre começam num keyframe.
 - **Rede lenta até o servidor**: se acumular, descarta e recomeça no próximo keyframe (no máximo 1 s, porque o GOP é 1 s).
 
 ## Testes feitos (11/11/2026)
 
 | Teste | Resultado |
 |---|---|
-| Pi real (`--h264`, webcam, 10 fps, 1000 kbps) → relay | Constrained Baseline, 640×480, 10 fps, 940–1060 kbps, keyframe a cada 1,00 s, SPS/PPS em todo keyframe e 1 fatia: nenhum aviso |
+| Pi real (`--h264`, webcam, 10 fps) → relay | Constrained Baseline, 640×480, 10 fps, 900–1060 kbps, keyframe a cada 1,00 s, SPS/PPS em todo keyframe e 1 fatia: nenhum aviso |
 | Vídeo fora do padrão (`robo_simulado.py --fora-do-padrao`) | avisos de perfil High, B‑frames, keyframe a cada 2,93 s e várias fatias |
-| WHIP com senha errada | 401, relay tenta de novo com espera crescente |
-| WHIP com senha certa (servidor de teste aiortc) | negociou H.264 `42001f`; o servidor decodificou 640×480 a ~10 fps; DELETE ao sair |
-| Encoder reiniciado (tempo voltando 5,9 s) e vídeo parado 5 s | relay emendou o tempo e retomou sozinho, sem erro no muxer |
-| Dashboard | câmera do robô anotada (:8091) e câmera da arena por WHEP, ao vivo |
+| **MediaMTX v1.21.3 local** (o servidor provável), Pi real → WHIP | Bearer e Basic aceitos; senha errada → 401; path `rover/rover03` com 1 track H264 |
+| Navegador lendo o nosso vídeo do MediaMTX (WHEP) | 640×480 a 10 fps, 0 pacotes perdidos, ~43 ms de jitter buffer |
+| Câmera da arena (MediaMTX, WHEP) no dashboard | ao vivo |
+| Encoder reiniciado e vídeo parado 5 s | relay emendou o tempo e retomou sozinho |
+| `mqtt/testar_agente.py` (broker local com ACL `rover/rover03/#`) | 16/16: online, Last Will, mode/state ao conectar, `cmd/mode` confirmado em ~2 ms, estados do controle, PARADO em ~30 ms, battery, `cmd/stop`, `cmd/state` e homem‑morto (355 ms depois do último `cmd/vel`; ~1 s sem heartbeat no AUTONOMO) |
+| Broker derrubado e religado | agente parou, reconectou sozinho e republicou `online` |
+| **Pi real** (agente no tmux `mqtt`, Wi‑Fi do lab, vídeo no ar), GS morta com `kill -9` dirigindo no MANUAL | parou **367 ms** depois do último `cmd/vel` (relógio do Pi) |
+| Pi real, GS morta no AUTONOMO | parou ~1 s depois do último heartbeat; com a GS viva, 30 s sem nenhuma parada falsa (heartbeat: mediana 103 ms, p95 233 ms, máximo 543 ms) |
+| Pi real, 30 s dirigindo no MANUAL | nenhuma parada falsa |
+| `gs_mqtt.py` com o YOLO ao vivo | heartbeat a 10 Hz; `cmd/vel` + zeros ao soltar; 1 detection por parada; sem repetição em 30 s, nem depois de reiniciar a GS; tempo de `arena/state` no dashboard |
 
-**Ainda não testado contra o servidor real.** O servidor de teste foi escrito com aiortc. O da competição é provavelmente o MediaMTX (as portas 8889/8189 são as dele). Antes da prova, vale testar com o MediaMTX local ou com o `sim_rover.py` do pacote das equipes.
+**Ainda não testado contra o servidor real da competição** (só existe no dia). O broker de teste foi o `amqtt`, e não o mosquitto.
 
 ## Pendências
 
-- **Telemetria MQTT (§3)**: `status` com Last Will, `state`, `mode`, `battery`, `detection`, comandos `cmd/*` e homem‑morto de 0,5 s. Ainda não feito.
-- **Classes do YOLO × contrato**: resolvido em `visao/pc/classes_contrato.json` (ampulheta→hiperboloide, anel_haste→argola_pequena, anel_base→argola_grande, cilindro→cilindro, peca_chata→exotico, icosaedro→não publicado). O detector já usa os nomes do contrato e publica a lista em `http://127.0.0.1:8091/deteccoes` (campo `artifact`). Para mudar a associação, edite só o JSON. Falta publicar `detection` no MQTT.
-- **Perda no Wi‑Fi do Pi 3**: às vezes aparecem riscos até o próximo keyframe. Com o MJPEG do `:8080` desligado sobra banda; vale testar no Wi‑Fi da arena.
-- **Pacote de referência** (`referencia/`: `gs_relay.py`, `robo_video.py`, `sim_rover.py`): não está no repo. Se a organização mandar, comparar com o nosso relay e rodar o `sim_rover.py`.
+- **`iniciar_gs.sh` inteiro com o MQTT**: cada parte foi testada com os mesmos comandos (scp + tmux `mqtt` no Pi, `gs_mqtt.py` no Mac), mas o script completo ainda não rodou de ponta a ponta depois de ganhar o MQTT.
+
+- **ESP32**: o firmware ainda não existe. O agente já fala o protocolo de `controle/protocolo_esp32.py` (CMD_VEL, MODE e TELEMETRIA); `cmd/arm` e `cmd/gripper` só aparecem no log até haver quadro para eles.
+- **Bateria**: vem da TELEMETRIA do ESP32. Para publicar a %, preencher `bateria_v_vazia` e `bateria_v_cheia` em `mqtt/config_robo.json` (confirmar a bateria com a eletrônica).
+- **Braço**: posições prontas em `ground_station/config_gs.json` → `braco.presets`.
+- **Perda no Wi‑Fi do Pi 3**: às vezes aparecem riscos até o próximo keyframe; vale testar no Wi‑Fi da arena.
+- **Pacote de referência** (`referencia/`: `gs_relay.py`, `robo_video.py`, `robo_agente.py`, `sim_rover.py`): não está no repo. Se a organização mandar, rodar o `sim_rover.py` contra a nossa GS.

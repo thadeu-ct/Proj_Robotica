@@ -29,6 +29,7 @@ dash.enviar(bateria=80, deteccoes=[{"classe": "cilindro", "conf": 0.91}])
 | `bateria` | `80` | % de 0 a 100; a bateria esvazia e muda de cor (verde, amarelo, vermelho) |
 | `tensao` | `7.9` | volts embaixo da % (opcional) |
 | `modo` | `"MANUAL"` | texto livre; MANUAL, AUTONOMO, RETORNO e PARADO ganham cor |
+| `estado` | `"BUSCA_ARTEFATO"` | fase do contrato, em letra menor sob o modo |
 | `tempo` | `"iniciar"` | `iniciar`, `pausar`, `continuar` ou `zerar`; ou `{"duracao": 240}` (padrão 4:00) |
 | `deteccoes` | `[{"classe": "cilindro", "conf": 0.91, "caixa": [x1, y1, x2, y2]}]` | acende o ícone da classe; apaga sozinho 1,5 s depois do último envio |
 | `video` | `{"vc": "http://127.0.0.1:8091/stream", "vs": "http://SERVIDOR:8889/arena/whep"}` | URL de MJPEG/imagem, ou WebRTC se terminar em `/whep`; `vc` = câmera do robô, `vs` = vista superior (o `gs_video.py` já manda a da arena) |
@@ -36,7 +37,8 @@ dash.enviar(bateria=80, deteccoes=[{"classe": "cilindro", "conf": 0.91}])
 | `arena` | `{"resgate": "SO"}` | canto da área de resgate no mapa: `NO`, `NE`, `SO` ou `SE` |
 | `mensagem` | `"capturando cilindro"` | texto verde no rodapé |
 
-Classes: `ampulheta`, `anel_base`, `anel_haste`, `cilindro`, `icosaedro`, `peca_chata`.
+Classes (nomes do contrato): `hiperboloide`, `argola_pequena`, `argola_grande`, `cilindro`, `exotico`.
+Cada detecção pode trazer `artifact` (nome do contrato; é o que acende o ícone) e `classe` (nome do modelo). O `detector_pc.py --dashboard` manda os itens; o `ground_station/gs_mqtt.py` preenche modo, estado, bateria e tempo.
 A `caixa` é opcional: em pixels do vídeo ou normalizada (0 a 1). Se o vídeo já vier anotado, não mande `caixa`, senão aparecem caixas duplicadas.
 
 `GET /api/estado` devolve o estado atual.
