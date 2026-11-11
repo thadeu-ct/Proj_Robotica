@@ -322,6 +322,9 @@ class H264Sender(threading.Thread):
                 "-profile:v", "578",                      # Constrained Baseline (o encoder nao aceita o nome)
                 "-num_capture_buffers", "16", "-bsf:v", "dump_extra",   # SPS/PPS em todo keyframe
                 "-flush_packets", "1", "-muxdelay", "0", "-muxpreload", "0",
+                # grava o tamanho de cada PES: o receptor sabe que o quadro acabou SEM esperar o proximo
+                # (sem isso, cada demux MPEG-TS no caminho segura 1 quadro = 100 ms a 10 fps)
+                "-omit_video_pes_length", "0",
                 "-f", "mpegts", self.url]
 
     def _ler_stderr(self, proc):

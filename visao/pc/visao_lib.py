@@ -202,46 +202,161 @@ class LocalReader(_Base):
 
 class UdpReader(_Base):
     """H.264/MPEG-TS por UDP (copia local do relay da ground station, ex.: udp://127.0.0.1:5001).
+
+    LATENCIA (medida em 11/11/2026, stream local H.264 baseline a 10 fps, atraso so do leitor):
+        OpenCV VideoCapture padrao ............ 1301 ms  (decodificador com 1 thread de QUADRO por nucleo:
+                                                          cada thread segura ~1 quadro; 12 nucleos = 1,3 s)
+        PyAV/FFmpeg demux, 1 thread ............ 201 ms  (o demux MPEG-TS so fecha um quadro quando o proximo
+                                                          comeca, e o separador de quadros H.264 segura mais um)
+        + PES com tamanho (Pi) ................. 101 ms
+        leitor TS proprio (este) + PES c/ tamanho  1 ms  <- padrao
+    O leitor proprio le os datagramas, junta os pacotes TS de 188 bytes no PES de video e entrega o quadro ao
+    decodificador (PyAV CodecContext, 1 thread) no instante em que o PES fica completo. Para isso o transmissor
+    precisa gravar o tamanho do PES (ffmpeg -omit_video_pes_length 0, ja ligado no camera_server.py). Se vier
+    sem tamanho, fecha o quadro quando o proximo comeca (~1 quadro de atraso), como o FFmpeg.
+    motor="ffmpeg" usa o demux do PyAV (mais tolerante a TS estranho); sem PyAV cai para o OpenCV com 1 thread.
     Sem relogio do Pi: o atraso mostrado conta so a partir da chegada aqui."""
 
-    def __init__(self, url):
+    OPCOES = {"fflags": "nobuffer", "flags": "low_delay", "probesize": "32768", "analyzeduration": "0"}
+
+    def __init__(self, url, motor="ts"):
         super().__init__()
         self.url = url
         self.connected = False
+        try:
+            import av  # noqa: F401
+            self.motor = motor
+        except ImportError:
+            self.motor = "opencv"
+        self.quadros_corrompidos = 0
 
     def run(self):
-        # baixa latencia: sem buffer de entrada no demuxer/decoder do FFmpeg
-        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "fflags;nobuffer|flags;low_delay")
         while self.running:
-            self.status = f"esperando video H.264 em {self.url}"
-            cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
-            if not cap.isOpened():
-                self.connected = False
-                time.sleep(1.0)
-                continue
+            self.status = f"esperando video H.264 em {self.url} (leitor {self.motor})"
+            try:
+                {"ts": self._ler_ts, "ffmpeg": self._ler_pyav}.get(self.motor, self._ler_opencv)()
+            except Exception as e:                        # timeout, porta, stream cortado: reabre
+                self.status = f"H.264 parou ({e.__class__.__name__}: {e}); reabrindo"
+            self.connected = False
+            time.sleep(0.5)
+
+    # ------------------------------------------------------------------ leitor TS proprio (padrao)
+    def _ler_ts(self):
+        import socket
+        import struct
+        import av
+
+        resto = self.url.split("://", 1)[-1].split("?")[0]
+        host, porta = resto.rsplit(":", 1)
+        host = host.strip("@") or "0.0.0.0"
+        sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sk.bind((host, int(porta)))
+        sk.settimeout(3.0)                               # 3 s sem dados -> reabre
+        dec = av.CodecContext.create("h264", "r")
+        dec.thread_count = 1                             # sem threads de quadro (ver tabela acima)
+        dec.thread_type = "NONE"
+        pes, total, pid_v, cc_ant = bytearray(), None, None, None
+
+        def entregar(buf):
+            if len(buf) < 9 or buf[6] & 0xC0 != 0x80:     # cabecalho PES invalido
+                return
+            try:
+                quadros = dec.decode(av.Packet(bytes(buf[9 + buf[8]:])))
+            except av.error.InvalidDataError:            # antes do 1o keyframe, ou dados perdidos no Wi-Fi
+                self.quadros_corrompidos += 1
+                return
+            for fr in quadros:
+                self._put(fr.to_ndarray(format="bgr24"), time.time())
+
+        self.connected = True
+        self.status = f"recebendo H.264 (leitor TS proprio) em {host}:{porta}"
+        try:
+            while self.running:
+                dados, _ = sk.recvfrom(65536)
+                for o in range(0, len(dados) - 187, 188):
+                    p = dados[o:o + 188]
+                    if p[0] != 0x47:
+                        continue
+                    pid = ((p[1] & 0x1F) << 8) | p[2]
+                    pusi, afc, cc = p[1] & 0x40, (p[3] >> 4) & 3, p[3] & 0x0F
+                    k = 4 + (1 + p[4] if afc & 2 else 0)
+                    if not afc & 1 or k >= 188:           # pacote so com adaptation field (PCR, enchimento)
+                        continue
+                    carga = p[k:]
+                    if pusi and carga[:3] == b"\x00\x00\x01" and 0xE0 <= carga[3] <= 0xEF:
+                        if pes and total is None:        # PES anterior sem tamanho: fecha agora
+                            entregar(pes)
+                        pid_v, cc_ant = pid, cc
+                        pes = bytearray(carga)
+                        n = struct.unpack(">H", bytes(carga[4:6]))[0]
+                        total = n + 6 if n else None
+                    elif pid == pid_v and pes:
+                        if cc_ant is not None and cc != (cc_ant + 1) & 0x0F:   # pacote TS perdido no meio do quadro
+                            self.quadros_corrompidos += 1
+                            pes, total = bytearray(), None
+                            cc_ant = cc
+                            continue
+                        cc_ant = cc
+                        pes += carga
+                    else:
+                        continue
+                    if total is not None and len(pes) >= total:   # PES completo: decodifica ja
+                        entregar(pes[:total])
+                        pes, total = bytearray(), None
+        finally:
+            sk.close()
+
+    # ------------------------------------------------------------------ alternativas
+    def _ler_pyav(self):
+        import av
+        c = av.open(self.url, options=self.OPCOES, timeout=(10.0, 3.0))   # (abrir, sem dados) em s
+        try:
+            s = c.streams.video[0]
+            s.codec_context.thread_count = 1
+            s.codec_context.thread_type = "NONE"
             self.connected = True
-            self.status = "recebendo H.264"
-            falhas = 0
+            self.status = "recebendo H.264 (PyAV/FFmpeg, 1 thread)"
+            for pkt in c.demux(s):
+                if not self.running:
+                    break
+                try:
+                    quadros = pkt.decode()
+                except av.error.InvalidDataError:
+                    self.quadros_corrompidos += 1
+                    continue
+                for fr in quadros:
+                    self._put(fr.to_ndarray(format="bgr24"), time.time())
+        finally:
+            c.close()
+
+    def _ler_opencv(self):
+        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "fflags;nobuffer|flags;low_delay")
+        cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG, [cv2.CAP_PROP_N_THREADS, 1])
+        if not cap.isOpened():
+            raise ConnectionError("nao abriu")
+        self.connected = True
+        self.status = "recebendo H.264 (OpenCV, 1 thread)"
+        falhas = 0
+        try:
             while self.running:
                 ok, f = cap.read()
                 if not ok or f is None:
                     falhas += 1
                     if falhas > 30:
-                        break
+                        raise ConnectionError("sem quadros")
                     time.sleep(0.02)
                     continue
                 falhas = 0
                 self._put(f, time.time())
+        finally:
             cap.release()
-            self.connected = False
-            self.status = "H.264 parou de chegar; reabrindo"
-            time.sleep(0.5)
 
 
 def abrir_fonte(args):
     """--udp / --url / --pi / --cam / --arquivo -> leitor ja iniciado."""
     if getattr(args, "udp", None):
-        r = UdpReader(args.udp)
+        r = UdpReader(args.udp, getattr(args, "leitor_udp", "ts"))
     elif getattr(args, "arquivo", None):
         r = LocalReader(args.arquivo)
     elif getattr(args, "cam", None) is not None:

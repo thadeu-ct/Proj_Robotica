@@ -41,6 +41,8 @@ fonte.add_argument("--pi", default="192.168.1.70", help="IP do Raspberry Pi (pad
 fonte.add_argument("--porta", type=int, default=8080)
 fonte.add_argument("--url", default=None, help="URL completa do MJPEG (ex.: http://127.0.0.1:18080/stream)")
 fonte.add_argument("--udp", default=None, help="H.264 MPEG-TS por UDP (ex.: udp://127.0.0.1:5001, copia local do relay da GS)")
+fonte.add_argument("--leitor-udp", default="ts", choices=["ts", "ffmpeg", "opencv"],
+                   help="ts = leitor proprio (~1 ms, padrao); ffmpeg = demux do PyAV (~100-200 ms); opencv (~100-200 ms)")
 fonte.add_argument("--cam", default=None, help="webcam deste computador (indice), para testar sem o Pi")
 fonte.add_argument("--arquivo", default=None, help="imagem ou video, para testar sem camera")
 p.add_argument("--modelo", default=MODELO_PADRAO)

@@ -74,6 +74,7 @@ Os arquivos que ficam em `~/yolo/robotica` no Pi são **cópias**: edite no repo
 - **`pkill -f camera_server.py` por ssh mata a própria sessão**, porque o texto aparece na linha de comando. Use `pkill -f '[c]amera_server.py'`.
 - **O `h264_v4l2m2m` não aceita o perfil pelo nome**: use `-profile:v 578` (Constrained Baseline). Ele também ignora `-maxrate`.
 - **Não dê o nome `_stderr` (nem `_target`, `_args`...) a métodos de subclasses de `threading.Thread`**: esses nomes são atributos internos do Python.
+- **Latência do vídeo H.264 no receptor: não use `cv2.VideoCapture` com as configurações padrão.** O decodificador do FFmpeg usa 1 thread de quadro por núcleo, e cada thread segura 1 quadro: 1,3 s num Mac de 12 núcleos a 10 fps. Use 1 thread. Também ajuda gravar o tamanho do PES no MPEG-TS (`-omit_video_pes_length 0`); sem ele, cada demux no caminho segura 1 quadro até o próximo começar. O `UdpReader` (`visao/pc/visao_lib.py`) tem um leitor TS próprio que entrega o quadro em ~1 ms; a tabela de medições está no docstring dele.
 - **Wi-Fi do Pi 3 ≈ 300 KB/s.** H.264 (~110 KB/s) e MJPEG juntos ficam no limite; sem o buffer de envio pequeno (`--sndbuf-kb`), o vídeo acumulava 3 s de atraso.
 - **O `sudo` do Pi pede senha**: o power save do Wi-Fi (`sudo iw wlan0 set power_save off`) precisa ser desligado à mão se o SSH começar a cair.
 

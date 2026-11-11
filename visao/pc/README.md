@@ -85,6 +85,7 @@ A associação foi feita pelo formato das peças nas fotos do dataset. Se a orga
 |---|---|
 | Distância 2–3 vezes maior | `--tag-mm` errado. Meça a borda preta da tag (a do lab tem 42 mm). |
 | Vídeo com segundos de atraso | Wi-Fi do Pi 3 saturado (~300 KB/s). Não deixe MJPEG e H.264 abertos ao mesmo tempo; o `/status` do Pi mostra `clients`. |
+| Vídeo H.264 atrasado (> 0,3 s) | Use o leitor padrão `--leitor-udp ts`. Confira se o Pi grava o tamanho do PES (`-omit_video_pes_length 0`, já está no `camera_server.py`) e se o relay também (opções do `av.open` de saída). O OpenCV padrão chegava a 1,3 s. |
 | Riscos na imagem por até 1 s | Perda de pacotes UDP no Wi-Fi; o vídeo se corrige no próximo keyframe. |
 | "Aguardando imagem..." | No Pi: `tmux attach -t cam` (sair sem parar: Ctrl+B, depois D). |
 | SSH cai | No Pi: `sudo iw wlan0 set power_save off`. |
