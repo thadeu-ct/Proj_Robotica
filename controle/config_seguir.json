@@ -1,0 +1,29 @@
+{
+  "_leia": [
+    "Parametros do seguir_tag.py. Mude aqui; nao precisa mexer em codigo. Unidades no proprio nome (cm, graus, m/s, rad/s).",
+    "tag_alvo: ID da AprilTag a seguir. null = a tag mais proxima que aparecer.",
+    "Os ganhos e limites sao conservadores para o primeiro teste com o robo suspenso. Aumente aos poucos no chao."
+  ],
+  "tag_alvo": 0,
+  "parar_a_cm": 20.0,
+  "tolerancia_cm": 2.0,
+  "tolerancia_graus": 4.0,
+
+  "alinhar_antes_se_maior_que_graus": 15.0,
+  "ganho_v_por_cm": 0.006,
+  "ganho_w_por_grau": 0.03,
+  "v_max_m_s": 0.15,
+  "v_min_m_s": 0.03,
+  "w_max_rad_s": 0.8,
+  "rampa_v_m_s2": 0.3,
+  "rampa_w_rad_s2": 2.0,
+
+  "parar_se_perder_tag_s": 0.5,
+  "procurar_apos_s": 2.0,
+  "procurar_w_rad_s": 0.0,
+
+  "url_tags": "http://127.0.0.1:8080/tags",
+  "taxa_comando_hz": 20,
+  "serial": "/dev/ttyUSB0",
+  "baud": 460800
+}

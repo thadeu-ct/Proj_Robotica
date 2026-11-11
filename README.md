@@ -6,6 +6,7 @@ Rover de resgate (ENG4461). **Comece pelo [`AGENTS.md`](AGENTS.md)**: arquitetur
 - `arduino/cinematica_braco/`: cinemática direta e inversa do braço de 2 servos
 - `servo_web/`: controle do servo pelo navegador (instruções no README da pasta)
 - `visao/`: percepção. `visao/pi/` roda no Raspberry Pi (câmera, **AprilTag embarcada** com distância e ângulo, vídeo H.264/MJPEG); `visao/pc/` roda no Mac (**YOLO**, nomes de artefato do contrato e saída anotada para o dashboard). Guias em `visao/README.md`
+- `controle/`: roda no Pi. O robô vai até a AprilTag e para a 20 cm (parâmetros em `config_seguir.json`), mais o protocolo Pi↔ESP32. Ver `controle/README.md`
 - `eletronica/`: ESP32 (motores NXT com DRV8833, encoders, sensores I2C, servos): pinagem e testes por componente. Ver `eletronica/README.md`
 - `dashboard/`: painel do robô para a tela (vista superior, câmera, modo, itens, tempo, bateria), atualizado por JSON. Ver `dashboard/README.md`
 - `ground_station/`: relay de vídeo do Mac para o servidor da competição (WHIP) e câmera da arena no dashboard. Guia em `docs/ground_station.md`

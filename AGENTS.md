@@ -8,14 +8,14 @@ Rover de resgate da disciplina de Robótica (ENG4461). Este arquivo é o ponto d
 |---|---|---|
 | **Raspberry Pi 3B** (hostname `puc1`, Debian 13 trixie) | `visao/pi/camera_server.py`: captura, **AprilTag embarcada** (distância e ângulo), H.264 para a ground station e MJPEG opcional | `ssh puc@<IP>` (no lab: 192.168.1.70). Código em `~/yolo/robotica/`; Python 3.10 + OpenCV 5.0 em `~/yolo/.venv` |
 | **Mac** (ground station) | YOLO (`visao/pc/detector_pc.py`), relay de vídeo para o servidor da competição (`ground_station/`) e dashboard (`dashboard/`) | local |
-| **ESP32 DevKit** | motores LEGO NXT (DRV8833) com encoders, sensores I2C e servos da garra. **Ainda não integrado ao Pi** | `eletronica/` |
+| **ESP32 DevKit** | motores LEGO NXT (DRV8833) com encoders, sensores I2C e servos da garra. **Firmware do protocolo ainda não feito** | `eletronica/` |
 
 A webcam (`USB2.0 PC CAMERA`, `/dev/video0`) só entrega YUYV (640x480 a 30 ou 15 fps). O Pi 3 tira cerca de 11 fps com a AprilTag rodando.
 
 ## Fluxo de dados
 
 ```
-webcam ─► Pi: camera_server.py ─┬─► AprilTag (apriltag_pi.py) ─► HTTP :8080/tags  (o controle autônomo vai usar isto)
+webcam ─► Pi: camera_server.py ─┬─► AprilTag (apriltag_pi.py) ─► HTTP :8080/tags ─► controle/seguir_tag.py ─CMD_VEL─► ESP32
                                 ├─► ffmpeg h264_v4l2m2m ─► MPEG-TS/UDP ─► Mac :5000 (ground_station/gs_video.py)
                                 │                                         ├─► WHIP para o servidor da competição
                                 │                                         ├─► udp://127.0.0.1:5001 ─► detector_pc.py (YOLO)
@@ -57,6 +57,8 @@ Os arquivos que ficam em `~/yolo/robotica` no Pi são **cópias**: edite no repo
 | detecção e pose da tag (código único, usado pelo Pi e pelo Mac) | `visao/pi/apriltag_pi.py` |
 | parâmetros do H.264 (§4.1) | `H264Sender` em `visao/pi/camera_server.py` |
 | relay, WHIP e dashboard | `ground_station/`, `dashboard/` (ver `docs/ground_station.md`) |
+| tag alvo, distância de parada, ganhos do seguir a tag | `controle/config_seguir.json` |
+| formato dos quadros Pi↔ESP32 | `controle/protocolo_esp32.py` (referência do firmware) |
 
 ## Convenções
 
@@ -78,5 +80,6 @@ Os arquivos que ficam em `~/yolo/robotica` no Pi são **cópias**: edite no repo
 ## Estado (11/11/2026) e próximos passos
 
 - Feito e validado no Pi real: AprilTag embarcada (11 fps; distância bate com a trena), H.264 conforme o §4.1 (verificado pacote a pacote pelo relay), YOLO no Mac a cerca de 10 fps e nomes de artefato do contrato.
-- **Próximo: seguir a tag com os motores.** O ESP32 deve rodar um PI de velocidade por roda a 100 Hz e o protocolo binário do relatório (§5.5: `0xAA 0x55`, tipo, sequência, tamanho, carga, CRC-16; `CMD_VEL` = 0x01; watchdog de 250 ms). O Pi lê `/tags` e manda `CMD_VEL`. Falta a eletrônica confirmar a pinagem (o relatório, `eletronica/ESP32 DevKit/pinout.md` e `eletronica/Programação/DRV8833.ino` divergem), a ligação Pi↔ESP32 (USB ou UART), o diâmetro da roda e a bitola.
+- Feito, mas sem motores: `controle/seguir_tag.py` (tag alvo 0, para a 20 cm, tudo em `config_seguir.json`) e `controle/protocolo_esp32.py`, testados no Pi em modo simulado com a tag real.
+- **Próximo: firmware do ESP32** com PI de velocidade por roda a 100 Hz, implementando `controle/protocolo_esp32.py` e o watchdog de 250 ms. Falta a eletrônica confirmar a pinagem (o relatório, `eletronica/ESP32 DevKit/pinout.md` e `eletronica/Programação/DRV8833.ino` divergem), a ligação Pi↔ESP32 (USB ou UART), o diâmetro da roda e a bitola.
 - Telemetria MQTT do contrato (§3): pendente (ground station).
