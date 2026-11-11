@@ -23,7 +23,7 @@ H.264 para a ground station (contrato da competicao, secao 4.1):
     python camera_server.py --h264 udp://IP_DO_MAC:5000
     -> ffmpeg h264_v4l2m2m (hardware do Pi), Constrained Baseline, sem B-frames, GOP = fps (1 keyframe/s)
        com SPS/PPS repetidos, 640x480, taxa FIXA de --h264-fps (repete o ultimo quadro se a camera atrasar),
-       --h264-kbps (padrao 1000), MPEG-TS por UDP.
+       --h264-kbps (padrao 900; o v4l2m2m nao respeita -maxrate), MPEG-TS por UDP.
     Com --h264 o JPEG do MJPEG so e gerado quando ha cliente no /stream (economiza CPU e Wi-Fi).
 
 Depende so de OpenCV, NumPy e da biblioteca padrao (Python 3.8+).
@@ -59,7 +59,7 @@ p.add_argument("--camera", default=None, help="JSON de calibracao (padrao: camer
 p.add_argument("--log-tags", type=float, default=1.0, help="imprime as tags no terminal a cada N s (0 desliga)")
 p.add_argument("--h264", default=None, help="envia H.264 em MPEG-TS por UDP para esse destino (ex.: udp://192.168.1.217:5000)")
 p.add_argument("--h264-fps", type=int, default=10, help="taxa FIXA do H.264; o GOP e igual a ela (1 keyframe por segundo)")
-p.add_argument("--h264-kbps", type=int, default=1000, help="bitrate do H.264 (contrato: no maximo 1500)")
+p.add_argument("--h264-kbps", type=int, default=900, help="bitrate medio do H.264 (contrato: no maximo 1500; 900 deixa folga para os picos)")
 p.add_argument("--sem-mjpeg", action="store_true", help="nao gera JPEG nem para /frame.jpg (so H.264 + tags)")
 args = p.parse_args()
 
@@ -324,7 +324,7 @@ class H264Sender(threading.Thread):
                 "-flush_packets", "1", "-muxdelay", "0", "-muxpreload", "0",
                 "-f", "mpegts", self.url]
 
-    def _stderr(self, proc):
+    def _ler_stderr(self, proc):
         for line in iter(proc.stderr.readline, b""):
             log("[h264] ffmpeg: " + line.decode(errors="replace").rstrip())
 
@@ -342,7 +342,7 @@ class H264Sender(threading.Thread):
             except FileNotFoundError:
                 log("[h264] ffmpeg nao encontrado (sudo apt install ffmpeg); H.264 desligado")
                 return
-            threading.Thread(target=self._stderr, args=(self.proc,), daemon=True).start()
+            threading.Thread(target=self._ler_stderr, args=(self.proc,), daemon=True).start()
             log(f"[h264] enviando para {self.url}: {w}x{h} {self.fps} fps fixos, GOP {self.fps}, {self.kbps} kbps")
             self.status = "enviando"
             last_seq = -1
