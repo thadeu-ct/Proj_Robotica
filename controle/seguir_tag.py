@@ -107,8 +107,14 @@ class SaidaSerial:
 
     def iniciar(self):
         self._env(proto.montar_modo(proto.MODO_AUTONOMO, self.seq))
+        self.t_modo = time.monotonic()
 
     def comando(self, v, w, estado, tag):
+        # reenvia o MODE a cada 1 s: se o ESP32 reiniciar ou o watchdog dele cair para ESPERA,
+        # ele volta a andar sozinho (em ESPERA o firmware ignora CMD_VEL)
+        if time.monotonic() - self.t_modo >= 1.0:
+            self._env(proto.montar_modo(proto.MODO_AUTONOMO, self.seq))
+            self.t_modo = time.monotonic()
         self._env(proto.montar_cmd_vel(v, w, self.seq))
         for tipo, _, carga in self.dec.alimentar(self.s.read(4096)):
             if tipo == proto.TELEMETRIA:

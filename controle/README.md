@@ -43,7 +43,7 @@ O `camera_server.py` precisa estar rodando (`visao/pc/iniciar.sh` ou `ground_sta
 
 Só **um** processo pode abrir a serial do ESP32:
 - **Com o agente MQTT** (competição): `seguir_tag.py --agente` manda, a 20 Hz, um datagrama UDP para `127.0.0.1:8095`: `{"v": m/s, "w": rad/s, "estado": "APROXIMANDO", "seq": n, "ts": epoch, "tag": {"id", "dist_cm", "angulo_deg"} ou null}`. O agente (`mqtt/robo_agente.py`, feito pela ground station) é o dono da serial. Ele só repassa ao ESP32 em modo AUTÔNOMO e aplica o homem-morto do contrato: para se o `seguir_tag` ficar mais de 0,5 s calado **ou se o broker cair**. Ao sair, o `seguir_tag` manda 3 vezes o estado `PARADO`.
-- **Sem o agente** (bancada): `--motores` abre a serial (`serial`/`baud` do `config_seguir.json`) e manda `CMD_VEL`/`MODE` direto.
+- **Sem o agente** (bancada): `--motores` abre a serial (`serial`/`baud` do `config_seguir.json`) e manda `CMD_VEL` a 20 Hz e `MODE` AUTÔNOMO a cada 1 s (se o ESP32 reiniciar ou o watchdog dele disparar, ele volta a andar sozinho). Firmware do outro lado: `firmware/esp32_locomocao/`.
 
 ## Protocolo (resumo de `protocolo_esp32.py`)
 
@@ -55,4 +55,4 @@ Só **um** processo pode abrir a serial do ESP32:
 - Simulação de cinemática: tag a 80 cm e 25° → alinha, aproxima e para a 21,9 cm em 7 s; ignora outra tag quando há alvo definido; para quando a tag some ou quando o quadro é velho.
 - No Pi real, simulado, com a tag ID 0 a 53,4 cm e +4,4°: `v = +0,106 m/s`, `w = −0,13 rad/s` (frente, virando para a direita), conforme a conta.
 - No Pi real, `--agente`: 104 datagramas em 5 s (20 Hz) com a tag real, terminando em `PARADO` com v = w = 0. Uma mensagem que falha no terminal (ssh fechado) não derruba o controle.
-- **Ainda não testado com motores**: falta o firmware do ESP32, que depende da pinagem, da ligação USB/UART e da geometria das rodas (perguntas enviadas à eletrônica).
+- **Ainda não testado com motores**: o firmware do ESP32 existe (`firmware/`) e foi testado no computador; falta o primeiro teste no robô suspenso.
