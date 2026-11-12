@@ -69,7 +69,8 @@ p.add_argument("--porta", type=int, default=cfg.get("porta", 1883))
 p.add_argument("--id", default=cfg.get("id"), help="ID da equipe (roverNN)")
 p.add_argument("--senha", default=os.environ.get("ROVER_SENHA", cfg.get("senha")))
 p.add_argument("--motores", action="store_true", help="manda pela serial (sem isso: simulado)")
-p.add_argument("--serial", default=CFG_SEGUIR.get("serial", "/dev/ttyUSB0"), help="padrao: controle/config_seguir.json")
+p.add_argument("--serial", default=CFG_SEGUIR.get("serial", "auto"),
+               help="padrao: controle/config_seguir.json; 'auto' (ou porta inexistente) procura o ESP32")
 p.add_argument("--baud", type=int, default=CFG_SEGUIR.get("baud", 460800))
 p.add_argument("--v-max", type=float, default=cfg.get("v_max_m_s", 0.20), help="m/s quando cmd/vel linear = 1")
 p.add_argument("--w-max", type=float, default=cfg.get("w_max_rad_s", 1.5), help="rad/s quando cmd/vel angular = 1")
@@ -123,16 +124,68 @@ class SaidaSimulada:
 
 
 class SaidaSerial:
+    """Serial do ESP32. "auto" (ou porta que nao existe) procura /dev/serial/by-id, ttyUSB e ttyACM.
+    Se o cabo cair, tenta reabrir a cada 1 s; enquanto isso os quadros sao descartados."""
+
     def __init__(self, porta, baud):
         import serial  # pyserial: so precisa com --motores
-        self.s = serial.Serial(porta, baud, timeout=0)
-        log("serial %s a %d baud" % (porta, baud))
+        self.serial = serial
+        self.porta_pedida, self.baud = porta, baud
+        self.s = None
+        self.t_tentativa = 0.0
+        self.avisou = False
+        self.abrir()
+
+    def candidatas(self):
+        import glob
+        if self.porta_pedida != "auto" and os.path.exists(self.porta_pedida):
+            return [self.porta_pedida]
+        return sorted(glob.glob("/dev/serial/by-id/*")) + sorted(glob.glob("/dev/ttyUSB*")) + sorted(glob.glob("/dev/ttyACM*"))
+
+    def abrir(self):
+        self.t_tentativa = time.monotonic()
+        erro = "nenhuma porta serial"
+        for porta in self.candidatas():
+            try:
+                self.s = self.serial.Serial(porta, self.baud, timeout=0, write_timeout=0)
+                log("serial %s a %d baud" % (porta, self.baud))
+                self.avisou = False
+                return
+            except (OSError, self.serial.SerialException) as e:
+                erro = "%s: %s" % (porta, e)
+        if not self.avisou:
+            log("ESP32 nao encontrado (%s); tentando de novo a cada 1 s" % erro)
+            self.avisou = True
+
+    def pronta(self):
+        if self.s is None and time.monotonic() - self.t_tentativa > 1.0:
+            self.abrir()
+        return self.s is not None
+
+    def perdeu(self, e):
+        log("serial caiu (%s)" % e)
+        try:
+            self.s.close()
+        except (OSError, self.serial.SerialException):
+            pass
+        self.s = None
 
     def enviar(self, quadro, descricao):
-        self.s.write(quadro)
+        if not self.pronta():
+            return
+        try:
+            self.s.write(quadro)
+        except (OSError, self.serial.SerialException) as e:
+            self.perdeu(e)
 
     def ler(self):
-        return self.s.read(256)
+        if not self.pronta():
+            return b""
+        try:
+            return self.s.read(256)
+        except (OSError, self.serial.SerialException) as e:
+            self.perdeu(e)
+            return b""
 
 
 # --------------------------------------------------------------------------- agente
@@ -148,6 +201,8 @@ class Agente:
         self.bateria = None                # (dict, hora)
         self.falhas = set()
         self.motivo_parado = None
+        self.esp_modo = None               # ultimo MODE mandado ao ESP32
+        self.t_esp_modo = 0.0
         self.seq = 0
         self.saida = SaidaSerial(args.serial, args.baud) if args.motores else SaidaSimulada()
         self.dec = proto.Decodificador()
@@ -160,6 +215,8 @@ class Agente:
         self.c.on_connect = self.ao_conectar
         self.c.on_disconnect = self.ao_desconectar
         self.c.on_message = self.ao_receber
+        self.c.on_connect_fail = self.falhou_conectar
+        self.avisou_falha = False
 
     # ---- MQTT
     def publicar(self, sub, carga, qos=1, retain=True):
@@ -171,11 +228,17 @@ class Agente:
             log("broker recusou a conexao: %s" % rc)
             return
         self.conectado = True
+        self.avisou_falha = False
         log("conectado ao broker %s:%d como %s" % (args.servidor, args.porta, args.id))
         self.publicar("status", "online")
         self.publicar("mode", {"ts": ts(), "mode": self.modo})
         self.publicar("state", {"ts": ts(), "state": self.estado})
         c.subscribe(self.base + "cmd/#", qos=1)
+
+    def falhou_conectar(self, c, u):
+        if not self.avisou_falha:   # o paho tenta de novo sozinho; avisa uma vez para nao inundar o log
+            log("nao conectou ao broker %s:%d (rede? IP do servidor?); tentando de novo" % (args.servidor, args.porta))
+            self.avisou_falha = True
 
     def ao_desconectar(self, c, u, flags, rc, props=None):
         if self.conectado:
@@ -229,8 +292,7 @@ class Agente:
             log("modo: %s -> %s" % (self.modo, m))
         self.modo = m
         self.manual = (0.0, 0.0, 0.0)
-        self.enviar(proto.montar_modo(proto.MODO_AUTONOMO if m == "AUTONOMO" else proto.MODO_MANUAL, self.prox_seq()),
-                    "MODE %s" % m)
+        self.t_esp_modo = 0.0              # o laco dos motores manda o MODE novo no proximo passo
         self.publicar("mode", {"ts": ts(), "mode": m})
 
     def trocar_estado(self, s):
@@ -266,19 +328,37 @@ class Agente:
             return 0.0, 0.0, "controle autonomo calado ha mais de %.2f s" % args.homem_morto
         return v, w, None
 
+    def modo_esp32(self, agora):
+        """MODE para o ESP32. Chamar com o lock. ESPERA (ponte H desligada) sem broker ou sem a GS."""
+        sem_broker = not self.conectado and not (self.modo == "AUTONOMO" and args.andar_sem_broker)
+        sem_gs = agora - self.t_gs > args.homem_morto_autonomo and not (self.modo == "AUTONOMO" and args.autonomo_sem_gs)
+        if sem_broker or sem_gs:
+            return proto.MODO_ESPERA, "ESPERA"
+        return (proto.MODO_AUTONOMO, "AUTONOMO") if self.modo == "AUTONOMO" else (proto.MODO_MANUAL, "MANUAL")
+
     def laco_motores(self, parar):
         periodo = 1.0 / TAXA_HZ
         prox = time.monotonic()
         while not parar.is_set():
             agora = time.monotonic()
             with self.lock:
+                # O ESP32 comeca em ESPERA, ignora CMD_VEL em ESPERA e cai para ESPERA no watchdog (250 ms):
+                # o MODE vai na hora em que muda e de novo a cada 1 s.
+                modo_esp, nome_esp = self.modo_esp32(agora)
+                mandar_modo = modo_esp != self.esp_modo or agora - self.t_esp_modo >= 1.0
+                if mandar_modo:
+                    if modo_esp != self.esp_modo:
+                        log("ESP32: MODE %s" % nome_esp)
+                    self.esp_modo, self.t_esp_modo = modo_esp, agora
                 v, w, motivo = self.velocidade(agora)
                 if motivo != self.motivo_parado:
                     if motivo and (self.motivo_parado is None):
                         log("homem-morto: parado (%s)" % motivo)
                     elif motivo is None:
-                        log("andando (%s)" % self.modo)
+                        log("comando ativo (%s)" % self.modo)
                     self.motivo_parado = motivo
+            if mandar_modo:
+                self.enviar(proto.montar_modo(modo_esp, self.prox_seq()), "MODE %s" % nome_esp)
             self.enviar(proto.montar_cmd_vel(v, w, self.prox_seq()), "CMD_VEL v=%.2f m/s w=%.2f rad/s" % (v, w))
             for tipo, _seq, carga in self.dec.alimentar(self.ler()):
                 if tipo == proto.TELEMETRIA:
@@ -286,6 +366,7 @@ class Agente:
             prox += periodo
             time.sleep(max(0.0, prox - time.monotonic()))
         self.enviar(proto.montar_cmd_vel(0, 0, self.prox_seq()), "CMD_VEL v=0.00 m/s w=0.00 rad/s")
+        self.enviar(proto.montar_modo(proto.MODO_ESPERA, self.prox_seq()), "MODE ESPERA")
 
     def ler(self):
         try:
@@ -299,11 +380,15 @@ class Agente:
         except ValueError as e:
             log("telemetria do ESP32 invalida: %s" % e)
             return
-        bat = {"v": t["bateria_v"]}
-        if BAT_VAZIA is not None and BAT_CHEIA is not None and BAT_CHEIA > BAT_VAZIA:
+        if t["bateria_v"] <= 0:            # 0 mV = sem leitura (INA219 ainda nao integrado): nao publica
+            bat = None
+        else:
+            bat = {"v": t["bateria_v"]}
+        if bat and BAT_VAZIA is not None and BAT_CHEIA is not None and BAT_CHEIA > BAT_VAZIA:
             bat["pct"] = max(0.0, min(100.0, 100 * (t["bateria_v"] - BAT_VAZIA) / (BAT_CHEIA - BAT_VAZIA)))
         with self.lock:
-            self.bateria = (bat, time.monotonic())
+            if bat:
+                self.bateria = (bat, time.monotonic())
             novas = set(t["falhas"]) - self.falhas
             self.falhas = set(t["falhas"])
         if novas:

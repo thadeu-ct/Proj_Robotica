@@ -113,7 +113,7 @@ O agente do Pi zera os motores se ficar sem:
 
 - **`iniciar_gs.sh` inteiro com o MQTT**: cada parte foi testada com os mesmos comandos (scp + tmux `mqtt` no Pi, `gs_mqtt.py` no Mac), mas o script completo ainda não rodou de ponta a ponta depois de ganhar o MQTT.
 
-- **ESP32**: o firmware ainda não existe. O agente já fala o protocolo de `controle/protocolo_esp32.py` (CMD_VEL, MODE e TELEMETRIA); `cmd/arm` e `cmd/gripper` só aparecem no log até haver quadro para eles.
+- **ESP32**: o firmware existe (`firmware/esp32_locomocao/`), mas ainda não foi ligado ao Pi. O agente já segue o comportamento dele, testado com um ESP32 falso numa pty: manda o MODE na hora e de novo a cada 1 s (o ESP32 começa em ESPERA, ignora CMD_VEL em ESPERA e cai para ESPERA no watchdog de 250 ms), manda ESPERA sem o broker ou sem a GS por 1 s, não publica bateria de 0 mV e acha a serial sozinho (`/dev/serial/by-id`, `ttyUSB*`, `ttyACM*`), reabrindo se o cabo cair. `cmd/arm` e `cmd/gripper` só aparecem no log até haver quadro para eles.
 - **Bateria**: vem da TELEMETRIA do ESP32. Para publicar a %, preencher `bateria_v_vazia` e `bateria_v_cheia` em `mqtt/config_robo.json` (confirmar a bateria com a eletrônica).
 - **Braço**: posições prontas em `ground_station/config_gs.json` → `braco.presets`.
 - **Perda no Wi‑Fi do Pi 3**: às vezes aparecem riscos até o próximo keyframe; vale testar no Wi‑Fi da arena.

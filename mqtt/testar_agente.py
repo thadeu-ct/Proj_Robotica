@@ -124,7 +124,7 @@ try:
             time.sleep(0.1)
         publicar(c, "vel", {"linear": 0.5, "angular": 0.0}, qos=0)
     ultimo = time.time()      # hora do ultimo cmd/vel (a homologacao mede da GS desligada: ate 100 ms depois)
-    andou = esperar_log(r"andando \(MANUAL\)", inicio, 2)
+    andou = esperar_log(r"comando ativo \(MANUAL\)", inicio, 2)
     parou = esperar_log(r"homem-morto: parado \(sem cmd/vel", ultimo, 2)
     checar("8. anda com cmd/vel", andou is not None)
     atraso = (parou[0] - ultimo) if parou else None
@@ -148,7 +148,7 @@ try:
     limpar("state")
     t0 = time.time()
     autonomo(20)
-    checar("8. anda no AUTONOMO com heartbeat da GS", esperar_log(r"andando \(AUTONOMO\)", t0, 1) is not None)
+    checar("8. anda no AUTONOMO com heartbeat da GS", esperar_log(r"comando ativo \(AUTONOMO\)", t0, 1) is not None)
     checar("2. state segue o controle (APROXIMANDO -> BUSCA_ARTEFATO)", esperar("state", obj("state", "BUSCA_ARTEFATO"), 2) is not None)
     udp.sendto(json.dumps({"v": 0.0, "w": 0.0, "estado": "CHEGOU"}).encode(), ("127.0.0.1", args.udp))
     checar("2. state CHEGOU -> ARTEFATO_ENCONTRADO", esperar("state", obj("state", "ARTEFATO_ENCONTRADO"), 2) is not None)

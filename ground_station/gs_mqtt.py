@@ -105,6 +105,8 @@ class GS:
         self.c.on_connect = self.ao_conectar
         self.c.on_disconnect = self.ao_desconectar
         self.c.on_message = self.ao_receber
+        self.c.on_connect_fail = self.falhou_conectar
+        self.avisou_falha = False
 
     # ---- MQTT
     def ao_conectar(self, c, u, flags, rc, props=None):
@@ -112,10 +114,16 @@ class GS:
             log("broker recusou a conexao: %s" % rc)
             return
         self.conectado = True
+        self.avisou_falha = False
         log("conectado ao broker %s:%d como %s (client_id %s-gs)" % (args.servidor, args.porta, args.id, args.id))
         for sub in ("status", "state", "mode", "battery"):
             c.subscribe(self.base + sub, qos=1)
         c.subscribe("arena/state", qos=1)
+
+    def falhou_conectar(self, c, u):
+        if not self.avisou_falha:   # o paho tenta de novo sozinho; avisa uma vez para nao inundar o log
+            log("nao conectou ao broker %s:%d (rede? IP do servidor?); tentando de novo" % (args.servidor, args.porta))
+            self.avisou_falha = True
 
     def ao_desconectar(self, c, u, flags, rc, props=None):
         if self.conectado:

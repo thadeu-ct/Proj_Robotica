@@ -6,7 +6,7 @@ O `ground_station/iniciar_gs.sh` instala e liga o agente no Pi (tmux `mqtt`), us
 
 ```
 python3 robo_agente.py                 # motores simulados (só imprime)
-python3 robo_agente.py --motores       # manda para o ESP32 (serial/baud de controle/config_seguir.json)
+python3 robo_agente.py --motores       # manda para o ESP32 (serial/baud de controle/config_seguir.json; porta inexistente = procura sozinho)
 ```
 
 | Arquivo | O que é |
@@ -17,3 +17,5 @@ python3 robo_agente.py --motores       # manda para o ESP32 (serial/baud de cont
 | `testar_agente.py` | autoteste estilo homologação: `python testar_agente.py --servidor 127.0.0.1 --id rover03 --senha X`. **Desligue antes o agente do Pi e o `gs_mqtt.py`** (mesmo client_id) |
 
 Quem manda a velocidade: no **MANUAL**, o `cmd/vel` da GS; no **AUTONOMO**, o `controle/seguir_tag.py --agente` por UDP em `127.0.0.1:8095` (`{"v", "w", "estado"}`), traduzindo o estado para o contrato pelo `config_robo.json`.
+
+Com o ESP32: o agente manda o MODE na hora em que muda e a cada 1 s (o ESP32 começa em ESPERA e cai para ESPERA no watchdog), e ESPERA quando fica sem broker ou sem a GS. Bateria de 0 mV conta como "sem leitura".
