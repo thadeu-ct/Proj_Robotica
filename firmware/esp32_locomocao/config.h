@@ -11,7 +11,9 @@
 // controle/config_seguir.json ("serial", "baud").
 #define BAUD_PI            460800
 // 0 = USB (Serial). 1 = UART2 nos GPIO 16 (RX2) / 17 (TX2), como no relatorio (secao 5.2).
+#ifndef USAR_UART2                // o gravar_esp32.sh pode passar -DUSAR_UART2=1
 #define USAR_UART2         0
+#endif
 #define PINO_UART2_RX      16
 #define PINO_UART2_TX      17
 
@@ -71,4 +73,6 @@ static const bool INVERTE_ENCODER[2] = {false, true};
 // 1 = em vez do protocolo, roda um teste em TEXTO no Monitor Serial (115200): gira cada motor
 // para frente e para tras e mostra os encoders. Use com o robo SUSPENSO para conferir
 // MOTOR_ESQ/DIR, INVERTE_MOTOR, INVERTE_ENCODER e CONTAGENS_POR_VOLTA.
+#ifndef MODO_BANCADA              // o gravar_esp32.sh --bancada passa -DMODO_BANCADA=1
 #define MODO_BANCADA       0
+#endif

@@ -18,25 +18,32 @@ ESP32 --TELEMETRIA (50 Hz)--> Pi
 
 Pinos: **padrão da eletrônica** (`eletronica/Programação/DRV8833.ino`, commit `a5f0ba3`, e `eletronica/ESP32 DevKit/pinout.md`). Motor A: IN 12/13, encoder 34/35. Motor B: IN 18/19, encoder 36/39. nSLEEP: 14. Alimentação do encoder: 32 (HIGH) e 33 (LOW).
 
-## Gravar
-
-Arduino IDE: placa **ESP32 Dev Module** (pacote "esp32" da Espressif), abrir `esp32_locomocao/esp32_locomocao.ino` e gravar. Pela linha de comando (no Mac já está instalado em `~/.local/bin/arduino-cli`, com o core esp32 3.3.12):
+## Gravar (um comando)
 
 ```bash
-arduino-cli compile --fqbn esp32:esp32:esp32 firmware/esp32_locomocao
-arduino-cli upload  --fqbn esp32:esp32:esp32 -p /dev/cu.usbserial-XXXX firmware/esp32_locomocao   # porta: arduino-cli board list
+firmware/gravar_esp32.sh                       # ESP32 no USB do Mac: compila e grava
+firmware/gravar_esp32.sh --bancada             # grava o TESTE DE BANCADA e abre o monitor (robô suspenso!)
+firmware/gravar_esp32.sh --via-pi 192.168.1.70           # ESP32 no USB do Pi: compila no Mac e grava pelo Pi
+firmware/gravar_esp32.sh --via-pi 192.168.1.70 --bancada # idem, com o monitor do teste pelo Pi
 ```
+
+O script acha a porta sozinho (ou use `--porta`). No modo `--via-pi`, ele:
+- instala o `esptool` no `~/yolo/.venv` do Pi, se faltar;
+- para o agente MQTT e o `seguir_tag.py`, que estariam usando a serial;
+- envia só ~350 KB (a imagem sem o enchimento do fim).
+
+No Mac, o `arduino-cli` e o core esp32 3.3.12 ficam em `~/.local/bin/arduino-cli`. Em outro computador, as instruções estão no cabeçalho do script. Pela Arduino IDE também funciona: placa **ESP32 Dev Module**, abrir `esp32_locomocao/esp32_locomocao.ino`.
 
 ## Primeiro uso (robô SUSPENSO, rodas no ar)
 
-1. Em `config.h`, coloque `MODO_BANCADA 1`, grave e abra o Monitor Serial a **115200**.
+1. `firmware/gravar_esp32.sh --bancada` (ou `--via-pi IP --bancada`). Pela IDE: `MODO_BANCADA 1` no `config.h`, gravar e abrir o Monitor Serial a **115200**.
 2. Para cada motor, o teste gira 2 s para um lado e 2 s para o outro e mostra as contagens. Confira:
    - qual motor é a roda **esquerda** → `MOTOR_ESQ`/`MOTOR_DIR`;
    - com comando "+", a roda vai para **frente**? Se não, `INVERTE_MOTOR[m] = true`;
    - com a roda indo para frente, as contagens são **positivas**? Se não, `INVERTE_ENCODER[m] = true`.
 3. Gire cada roda uma volta à mão quando ele pedir e anote as contagens → `CONTAGENS_POR_VOLTA` (esperado ~720).
 4. Meça o diâmetro da roda (`RAIO_RODA_M` = diâmetro/2) e a bitola (`BITOLA_M`).
-5. Volte para `MODO_BANCADA 0`, grave, ligue o ESP32 no USB do Pi e rode, ainda suspenso: `python3 controle/seguir_tag.py --motores`.
+5. Grave o modo normal (`firmware/gravar_esp32.sh`), ligue o ESP32 no USB do Pi e rode, ainda suspenso: `python3 ~/yolo/robotica/controle/seguir_tag.py --motores`.
 
 ## Comportamento
 

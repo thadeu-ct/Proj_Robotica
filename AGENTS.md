@@ -43,6 +43,8 @@ A AprilTag roda **no Pi**, e não no Mac, para o controle autônomo não depende
 - **Laboratório (só visão, MJPEG)**: `visao/pc/iniciar.sh [IP]`. Envia os arquivos ao Pi, sobe o servidor e abre a janela do detector. Ver `visao/pc/README.md`.
 - **Só o Pi**: `ssh puc@<IP> 'bash yolo/robotica/iniciar_servidor.sh 8080 --tag-mm 42 --tag-familias 25h9 [--h264 udp://IP_DO_MAC:5000]'`. A saída aparece com `tmux attach -t cam` no Pi.
 - **Parar o Pi**: `visao/pc/parar.sh [IP]`.
+- **Atualizar o Pi** (tudo o que roda nele: visão, controle, agente MQTT): `./subir_pi.sh [IP]` (`--reiniciar` reinicia a câmera).
+- **Gravar o ESP32**: `firmware/gravar_esp32.sh` (USB do Mac) ou `firmware/gravar_esp32.sh --via-pi [IP]` (USB do Pi); `--bancada` para o teste do robô suspenso.
 
 Os arquivos que ficam em `~/yolo/robotica` no Pi são **cópias**: edite no repo e reenvie com `iniciar.sh` ou `scp`. Nunca edite direto no Pi.
 

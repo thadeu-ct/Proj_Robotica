@@ -2,6 +2,8 @@
 
 Rover de resgate (ENG4461). **Comece pelo [`AGENTS.md`](AGENTS.md)**: arquitetura, portas, como ligar e armadilhas conhecidas.
 
+Atualizar o Raspberry Pi: `./subir_pi.sh [IP]`. Gravar o ESP32: `firmware/gravar_esp32.sh` (ou `--via-pi [IP]`, `--bancada`).
+
 - `arduino/pid_pwm/`: PID/PWM com leitura de RPM (aula 16/09)
 - `arduino/cinematica_braco/`: cinemática direta e inversa do braço de 2 servos
 - `servo_web/`: controle do servo pelo navegador (instruções no README da pasta)
