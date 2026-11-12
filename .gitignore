@@ -17,3 +17,6 @@ ground_station/config_local.json
 ground_station/.venv/
 ground_station/logs/
 mqtt/config_local.json
+
+# firmware: saida de compilacao do arduino-cli
+firmware/**/build/
