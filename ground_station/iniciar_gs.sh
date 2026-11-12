@@ -61,6 +61,8 @@ say "POV cru em http://localhost:8092/stream"
 rodar ver_video "$PY" -u "$GS/ver_video.py" udp://127.0.0.1:5002 --porta 8092
 
 if [ -z "${SEM_PI:-}" ]; then
+  say "Pi $PI_USER@$PI_IP: atualizando os arquivos (subir_pi.sh: visao/pi, controle, mqtt)"
+  PI_USER="$PI_USER" "$RAIZ/subir_pi.sh" "$PI_IP" || warn "nao consegui atualizar o Pi; seguindo com os arquivos que ja estao la"
   say "Pi $PI_USER@$PI_IP: camera_server com H.264 para $MEU_IP:5000"
   ssh -o ConnectTimeout=5 "$PI_USER@$PI_IP" \
     "bash yolo/robotica/iniciar_servidor.sh 8080 --tag-mm $TAG_MM --tag-familias $TAG_FAMILIAS --h264 udp://$MEU_IP:5000" \
@@ -74,11 +76,8 @@ if [ -z "${SEM_MQTT:-}" ] && [ -z "$SEM_SERVIDOR" ]; then
   if [ -z "${SEM_PI:-}" ]; then
     if [ -n "${MOTORES:-}" ]; then TXT_MOTORES="REAIS"; else TXT_MOTORES="simulados (MOTORES=1 para valer)"; fi
     say "Pi: agente MQTT do robo (tmux 'mqtt'; motores $TXT_MOTORES)"
-    ssh -o ConnectTimeout=5 "$PI_USER@$PI_IP" "mkdir -p yolo/robotica/mqtt yolo/robotica/controle" \
-      && scp -q "$RAIZ/mqtt/robo_agente.py" "$RAIZ/mqtt/config_robo.json" "$PI_USER@$PI_IP:yolo/robotica/mqtt/" \
-      && scp -q "$GS/config_local.json" "$PI_USER@$PI_IP:yolo/robotica/mqtt/config_local.json" \
-      && scp -q "$RAIZ/controle/protocolo_esp32.py" "$RAIZ/controle/config_seguir.json" "$PI_USER@$PI_IP:yolo/robotica/controle/" \
-      && ssh -o ConnectTimeout=5 "$PI_USER@$PI_IP" \
+    # os arquivos (robo_agente, config_robo, config_local, protocolo) ja foram pelo subir_pi.sh
+    ssh -o ConnectTimeout=5 "$PI_USER@$PI_IP" \
         "tmux kill-session -t mqtt 2>/dev/null; cd yolo/robotica/mqtt && tmux new -d -s mqtt '../../.venv/bin/python -u robo_agente.py ${MOTORES:+--motores} 2>&1 | tee agente.log'" \
       || warn "nao consegui iniciar o agente MQTT no Pi"
   fi
