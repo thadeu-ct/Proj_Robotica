@@ -244,7 +244,9 @@ class GS:
             partes.append("ROBÔ OFFLINE" if r.get("status") == "offline" else "robô sem status")
         if not self.conectado:
             partes.append("GS sem broker")
-        if arena:
+        if arena and arena[0].get("active") not in (None, args.id):
+            partes.append("rodada %s: vez do %s" % (arena[0].get("round", "?"), arena[0].get("active")))
+        elif arena:   # so a nossa rodada vira tempo e pontos no dashboard
             a, recebido = arena
             partes.append("rodada %s · %s pts" % (a.get("round", "?"), a.get("points", 0)))
             limite = a.get("time_limit_ms")
